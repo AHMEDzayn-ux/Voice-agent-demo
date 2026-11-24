@@ -27,6 +27,12 @@ Open **Live test** and choose **Start mic** or select a simulated recording and 
 
 Sessions last up to two minutes. Vercel issues short-lived client tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
+### Measure live cleanup
+
+Use **Show** to switch among **Raw transcript**, **Deterministic cleanup**, and **LLM cleanup**. Deterministic cleanup runs locally as final text arrives. To benchmark Gemini 3.5 Flash-Lite, select **Run Flash-Lite cleanup after streaming** before starting the test. Each provider with final text makes one cleanup request after its stream finishes. Flash-Lite receives the deterministic transcript and uses the existing Google API key. Responses that change numeric sequences are discarded.
+
+Each provider reports the duration added by each stage and the cumulative time from the first audio packet. **Finalization wait** measures the gap between the last deterministic output and the cleanup request. That gap can include trailing audio and up to five seconds for providers to send their last results. **Flash-Lite** measures the browser request through the full corrected text. The panel also shows the Gemini API round trip and the total time after audio ended.
+
 Compare **Pauses and restarts · Clean recording** with its fan and office variants. Each mix uses the same speech and timing. The added noise level gives a 10 dB signal-to-noise ratio over speech intervals estimated with Silero VAD. The fan and office source recordings are CC0. [Computer Fan Loop by Ezcah](https://freesound.org/people/Ezcah/sounds/242042/) and [Office Ambience by DiArchangeli](https://freesound.org/people/DiArchangeli/sounds/108695/).
 
 ## Preview and test

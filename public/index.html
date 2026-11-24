@@ -72,8 +72,13 @@
         <p class="player-status" id="live-status" role="status">Recordings play and stream at 1×. Limit two minutes.</p>
       </div>
       <div class="live-view-tools">
-        <span>Times start at the first audio packet.</span>
-        <label><input id="live-rules" type="checkbox"> Apply deterministic cleanup</label>
+        <label>Show <select id="live-stage">
+          <option value="raw">Raw transcript</option>
+          <option value="rules">Deterministic cleanup</option>
+          <option value="llm">LLM cleanup</option>
+        </select></label>
+        <label><input id="live-llm" type="checkbox"> Run Flash-Lite cleanup after streaming</label>
+        <span>Totals start at the first audio packet.</span>
       </div>
       <div id="live-feeds" class="transcripts"></div>
     </section>

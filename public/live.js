@@ -78,9 +78,65 @@
     transcript.setAttribute("aria-label", `${model} live transcript`);
     const timing = make("p", null, "transcript-foot");
     timing.hidden = true;
-    panel.append(header, metrics, transcript, timing);
+    const pipeline = make("table", null, "live-pipeline");
+    pipeline.setAttribute("aria-label", `${model} pipeline latency`);
+    const pipelineHead = make("thead");
+    const headings = make("tr");
+    for (const label of ["Stage", "Added", "Total"]) {
+      const cell = make("th", label);
+      cell.scope = "col";
+      headings.append(cell);
+    }
+    pipelineHead.append(headings);
+    const pipelineBody = make("tbody");
+    const stages = {};
+    for (const [key, label] of [["stt", "STT final"], ["rules", "Deterministic"], ["wait", "Finalization wait"], ["llm", "Flash-Lite"]]) {
+      const row = make("tr");
+      const title = make("th", label);
+      title.scope = "row";
+      const added = make("td", "—");
+      const total = make("td", "—");
+      row.append(title, added, total);
+      row.hidden = key === "wait";
+      pipelineBody.append(row);
+      stages[key] = { row, added, total };
+    }
+    pipeline.append(pipelineHead, pipelineBody);
+    const cleanupNote = make("p", null, "transcript-foot live-cleanup-note");
+    cleanupNote.hidden = true;
+    panel.append(header, metrics, transcript, timing, pipeline, cleanupNote);
     get("live-feeds").append(panel);
-    states[provider] = { status, fields, transcript, timing };
+    states[provider] = { status, fields, transcript, timing, stages, cleanupNote };
+  }
+
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms)) return "—";
+    return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${ms.toFixed(ms < 10 ? 1 : 0)} ms`;
+  }
+
+  function renderPipeline(run, ui, pipeline) {
+    const llm = pipeline?.llm;
+    const stageTimes = {
+      stt: [pipeline?.sttMs, pipeline?.sttMs],
+      rules: [pipeline?.rulesMs, pipeline?.rulesTotal],
+      wait: [llm?.waitMs, llm?.requestAt],
+      llm: [llm?.requestMs, llm?.text ? llm.totalMs : null],
+    };
+    for (const [key, [added, total]] of Object.entries(stageTimes)) {
+      const stage = ui.stages[key];
+      stage.added.textContent = formatDuration(added);
+      stage.total.textContent = formatDuration(total);
+    }
+    ui.stages.wait.row.hidden = !llm;
+    const notes = [];
+    if (llm?.error) notes.push(llm.error);
+    if (llm && llm.requestMs === undefined && get("live-stage").value !== "llm") notes.push("Flash-Lite is cleaning the final transcript…");
+    if (Number.isFinite(llm?.apiMs)) notes.push(`Gemini API ${formatDuration(llm.apiMs)}`);
+    if (llm?.text && run.audioEndedAt !== undefined) {
+      notes.push(`${formatDuration(Math.max(0, run.started + llm.totalMs - run.audioEndedAt))} after audio end`);
+    }
+    ui.cleanupNote.textContent = notes.join(" · ");
+    ui.cleanupNote.hidden = !notes.length;
   }
 
   function render(run, provider) {
@@ -90,14 +146,28 @@
       const value = observed[key];
       field.textContent = key === "interimCount" ? value : value === null ? "—" : `${value.toFixed(2)} s`;
     }
-    const clean = (text) => get("live-rules").checked ? core.clean(text) : text;
     const { raw, interim } = provider === "openai" ? run.openaiTranscript.text() : observed;
+    let pipeline = run.pipeline[provider];
+    if (raw && raw !== pipeline?.raw) {
+      const start = performance.now();
+      const rules = core.clean(raw);
+      const end = performance.now();
+      pipeline = run.pipeline[provider] = { raw, rules, sttMs: observed.lastFinal * 1000, rulesMs: end - start, rulesTotal: end - run.started };
+    }
+    const stage = get("live-stage").value;
+    const text = stage === "llm" ? pipeline?.llm?.text : stage === "rules" ? pipeline?.rules : raw;
+    const pending = stage === "rules" ? core.clean(interim) : interim;
+    const showInterim = pending && stage !== "llm";
     ui.transcript.replaceChildren();
-    if (!raw && !interim) {
-      ui.transcript.append(make("span", "Waiting for transcript.", "waiting"));
+    if (!text && !showInterim) {
+      const waiting = stage !== "llm" ? "Waiting for transcript."
+        : !run.llmEnabled ? "Enable Flash-Lite before starting a test."
+          : pipeline?.llm?.error ? "Cleanup unavailable. Raw and deterministic transcripts are still available."
+            : pipeline?.llm ? "Waiting for Flash-Lite…" : "Flash-Lite starts after streaming.";
+      ui.transcript.append(make("span", waiting, "waiting"));
     } else {
-      if (raw) ui.transcript.append(make("span", clean(raw)));
-      if (interim) ui.transcript.append(make("span", `${raw ? " " : ""}${clean(interim)}`, "interim"));
+      if (text) ui.transcript.append(make("span", text));
+      if (showInterim) ui.transcript.append(make("span", `${text ? " " : ""}${pending}`, "interim"));
     }
     ui.transcript.scrollTop = ui.transcript.scrollHeight;
     const latest = run.latest[provider];
@@ -108,6 +178,34 @@
         ? `${kind} received at ${elapsed(latest.arrival)}${latest.afterPlayback ? " · after playback" : ""}`
         : `${kind} received at recording ${elapsed(latest.position)}`;
     }
+    renderPipeline(run, ui, pipeline);
+  }
+
+  async function requestCleanup(run, provider) {
+    const pipeline = run.pipeline[provider];
+    if (!run.llmEnabled || !pipeline?.rules || pipeline.llm || lastRun !== run) return;
+    const start = performance.now();
+    const requestAt = start - run.started;
+    const llm = pipeline.llm = { requestAt, waitMs: Math.max(0, requestAt - pipeline.rulesTotal) };
+    render(run, provider);
+    try {
+      const response = await fetch("/api/live-cleanup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: pipeline.rules }), signal: run.cleanupController.signal,
+      });
+      const result = await response.json().catch(() => ({}));
+      llm.apiMs = result.apiMs;
+      if (!response.ok || typeof result.text !== "string" || !result.text.trim()) {
+        throw new Error(result.error || "Flash-Lite cleanup was unavailable.");
+      }
+      llm.text = result.text;
+    } catch (error) {
+      llm.error = error.message;
+    }
+    const end = performance.now();
+    llm.requestMs = end - start;
+    llm.totalMs = end - run.started;
+    if (lastRun === run && !run.cleanupController.signal.aborted) render(run, provider);
   }
 
   function playbackPosition(run) {
@@ -126,7 +224,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-llm"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -146,6 +244,7 @@
     if (current !== run) return;
     current = null;
     run.controller.abort();
+    for (const resolve of Object.values(run.drains)) resolve();
     releaseAudio(run);
     for (const [provider, socket] of Object.entries(run.sockets)) {
       if (socket.readyState < WebSocket.CLOSING) socket.close();
@@ -210,7 +309,7 @@
         else ready();
       });
       socket.addEventListener("message", ({ data }) => {
-        if (current !== run) return;
+        if (current !== run || run.sealed.has(provider)) return;
         try {
           const message = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data));
           if (provider === "gemini" && "setupComplete" in message) ready();
@@ -252,6 +351,7 @@
       });
       socket.addEventListener("close", ({ code }) => {
         clearTimeout(timeout);
+        run.drains[provider]?.();
         if (current === run && !run.stopping && !run.failed.has(provider)) {
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
@@ -317,18 +417,33 @@
       });
     }
     if (!run.playback?.ended) releaseAudio(run);
-    const open = [];
+    run.audioEndedAt = performance.now();
+    const drains = [];
+    const seal = (provider) => {
+      if (current !== run) return;
+      run.sealed.add(provider);
+      void requestCleanup(run, provider);
+    };
     for (const [provider, socket] of Object.entries(run.sockets)) {
       if (run.ready.has(provider) && socket.readyState === WebSocket.OPEN) {
+        const drained = new Promise((resolve) => { run.drains[provider] = resolve; });
+        drains.push(drained.then(() => seal(provider)));
         try {
           const packets = provider === "openai" ? run.openaiInput.finish() : [wire.endPacket(provider)];
           for (const packet of packets) socket.send(packet);
-          open.push(socket);
         }
-        catch { /* Connection already closed. */ }
+        catch { run.drains[provider](); }
+      } else {
+        seal(provider);
       }
     }
-    if (open.length) await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (drains.length) {
+      const deadline = setTimeout(() => {
+        for (const resolve of Object.values(run.drains)) resolve();
+      }, 5000);
+      await Promise.all(drains);
+      clearTimeout(deadline);
+    }
     finish(run, message);
   }
 
@@ -343,10 +458,12 @@
     if (mode === "mic" && !navigator.mediaDevices?.getUserMedia) {
       return get("live-status").textContent = "Microphone access requires HTTPS or localhost.";
     }
+    lastRun?.cleanupController.abort();
     const run = {
       started: null, stopping: false, sockets: {}, ready: new Set(), failed: new Set(),
       events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
       openaiInput: wire.openaiInput(), openaiTranscript: wire.openaiTranscript(), latest: {}, controller: new AbortController(),
+      llmEnabled: get("live-llm").checked, pipeline: {}, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
     };
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
@@ -453,10 +570,13 @@
     get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
-  get("live-rules").addEventListener("change", () => {
+  get("live-stage").addEventListener("change", () => {
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
-  window.addEventListener("pagehide", () => { if (current) finish(current, "Test ended."); });
+  window.addEventListener("pagehide", () => {
+    lastRun?.cleanupController.abort();
+    if (current) finish(current, "Test ended.");
+  });
   window.LiveBench = { stop };
   refreshRecordings();
 })();

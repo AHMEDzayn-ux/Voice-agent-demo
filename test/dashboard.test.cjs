@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const core = require("../public/demo-core.js");
 const wire = require("../public/live-wire.js");
 const liveSession = require("../api/live-session.js");
+const liveCleanup = require("../api/live-cleanup.js");
 
 const site = path.join(__dirname, "..", "public");
 const load = (file) => fs.readFileSync(path.join(site, file), "utf8");
@@ -225,11 +226,12 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("a noisy recording plays and streams to all three providers", async () => {
+test("a recording plays through three STT providers and reports optional cleanup timings", async () => {
   const sent = { deepgram: [], gemini: [], openai: [] };
   const clocks = [];
   let tick;
   let audioTime = 1;
+  let wallTime = 123;
   let playing = false;
   let contextClosed = false;
   const destination = {};
@@ -285,6 +287,10 @@ test("a noisy recording plays and streams to all three providers", async () => {
         this.emit(this.provider === "deepgram"
           ? { type: "Results", is_final: true, channel: { alternatives: [{ transcript: text }] } }
           : { serverContent: { inputTranscription: { text } } });
+        if (message?.type === "CloseStream") {
+          this.readyState = Socket.CLOSING;
+          this.dispatchEvent(new Event("close"));
+        }
         return;
       }
       assert.ok(playing);
@@ -321,9 +327,14 @@ test("a noisy recording plays and streams to all three providers", async () => {
   const audio = "assets/pause-fan_noise_10db.wav";
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController,
+    performance: { now: () => wallTime },
     async fetch(url, options) {
       requested.push(url);
       if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
+      if (url === "/api/live-cleanup") {
+        assert.deepEqual(JSON.parse(options.body), { text: "\u0dc3\u0dd2" });
+        return { ok: true, json: async () => { wallTime += 680; return { text: "\u0dc3\u0dd2.", apiMs: 620 }; } };
+      }
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
       assert.equal(options.body, undefined);
@@ -343,6 +354,7 @@ test("a noisy recording plays and streams to all three providers", async () => {
     clearTimeout() {},
   });
   assert.deepEqual(requested, []);
+  nodes["live-llm"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
@@ -373,15 +385,67 @@ test("a noisy recording plays and streams to all three providers", async () => {
   assert.equal(sent.openai[2].byteLength, 2880);
   assert.equal(nodes["live-progress"].value, 0.04);
   assert.equal(contextClosed, false);
-  clocks.shift().callback();
   await Promise.resolve();
+  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  wallTime += 5000;
+  clocks.shift().callback();
+  await new Promise(setImmediate);
   assert.equal(contextClosed, true);
+  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 3);
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {
     assert.equal(panel.children[0].children[1].textContent, "Complete");
     assert.equal(panel.children[2].children[0].textContent, "\u0dc3\u0dd2");
     assert.match(panel.children[3].textContent, /Final received .* after playback/);
+    const rows = panel.children[4].children[1].children;
+    assert.equal(rows[1].children[1].textContent, "0.0 ms");
+    assert.match(rows[2].children[2].textContent, /(?:ms|s)$/);
+    assert.match(rows[3].children[2].textContent, / s$/);
+    assert.match(panel.children[5].textContent, /Gemini API 620 ms.*after audio end/);
   }
+  nodes["live-stage"].value = "llm";
+  nodes["live-stage"].callbacks.change();
+  for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[2].children[0].textContent, "\u0dc3\u0dd2.");
+});
+
+test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digits", async (t) => {
+  const key = process.env.GOOGLE_API_KEY;
+  process.env.GOOGLE_API_KEY = "example-cleanup-key";
+  t.after(() => {
+    if (key === undefined) delete process.env.GOOGLE_API_KEY;
+    else process.env.GOOGLE_API_KEY = key;
+  });
+  const text = "\u0dc3\u0dd2 2048";
+  let output = `${text}.`;
+  const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
+    assert.equal(options.headers["x-goog-api-key"], "example-cleanup-key");
+    const request = JSON.parse(options.body);
+    assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
+    assert.equal(request.contents[0].parts[0].text, text);
+    return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: output }] } }] }) };
+  });
+  const response = () => ({
+    headers: {}, setHeader(name, value) { this.headers[name] = value; },
+    status(code) { this.code = code; return this; }, json(body) { this.body = body; },
+  });
+  const invalid = response();
+  await liveCleanup({ method: "POST", body: { text: " " } }, invalid);
+  assert.equal(invalid.code, 400);
+  assert.equal(fetch.mock.callCount(), 0);
+
+  const valid = response();
+  await liveCleanup({ method: "POST", body: { text } }, valid);
+  assert.equal(valid.code, 200);
+  assert.equal(valid.headers["Cache-Control"], "no-store");
+  assert.equal(valid.body.text, `${text}.`);
+  assert.ok(Number.isFinite(valid.body.apiMs));
+
+  output = text.replace("2048", "2049");
+  const rejected = response();
+  await liveCleanup({ method: "POST", body: { text } }, rejected);
+  assert.equal(rejected.code, 422);
+  assert.equal(rejected.body.text, undefined);
 });
 
 test("token endpoint works with one configured provider and mints an ephemeral OpenAI token", async (t) => {
