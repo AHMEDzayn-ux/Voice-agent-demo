@@ -197,11 +197,14 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
 test("a noisy recording plays while identical 20 ms packets stream to both providers", async () => {
   const sent = { deepgram: [], gemini: [] };
   const clocks = [];
+  let tick;
+  let audioTime = 1;
   let playing = false;
+  let contextClosed = false;
   const destination = {};
   const playback = {
     connect(output) { assert.equal(output, destination); },
-    start() { playing = true; },
+    start(when) { assert.equal(when, audioTime); playing = true; },
   };
   class Socket extends EventTarget {
     static OPEN = 1;
@@ -248,11 +251,15 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   }
   class TestAudioContext {
     state = "running";
-    sampleRate = 16000;
+    sampleRate = 48000;
     destination = destination;
+    get currentTime() { return audioTime; }
     async resume() {}
-    async close() { this.state = "closed"; playing = false; }
+    async close() { this.state = "closed"; contextClosed = true; }
     createBufferSource() { return playback; }
+  }
+  class TestOfflineAudioContext {
+    constructor(_channels, _length, rate) { assert.equal(rate, 16000); }
     async decodeAudioData() {
       return {
         length: 640, numberOfChannels: 1, duration: 0.04,
@@ -263,7 +270,7 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   const requested = [];
   const audio = "assets/pause-fan_noise_10db.wav";
   const { nodes } = initDashboard("#live", {
-    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
+    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController,
     async fetch(url, options) {
       requested.push(url);
       if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
@@ -275,7 +282,8 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
         geminiSetup: { model: "models/gemini-3.8-live" },
       }) };
     },
-    setInterval: () => 0, clearInterval() {},
+    setInterval(callback) { tick = callback; return 0; },
+    clearInterval() {},
     setTimeout(callback, delay) {
       if (delay >= 8000) return 0;
       clocks.push({ callback, delay });
@@ -290,11 +298,17 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   assert.equal(playback.buffer.length, 640);
   assert.equal(playing, true);
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
+  assert.equal(nodes["live-progress"].hidden, false);
+  assert.equal(nodes["live-progress"].max, 0.04);
   for (const panel of nodes["live-feeds"].children) {
     assert.equal(panel.children[2].children[0].textContent, "\u0dc3");
+    assert.equal(panel.children[3].textContent, "Interim received at recording 0:00.0");
   }
   assert.equal(sent.deepgram.length, 1);
   assert.equal(clocks[0].delay, 20);
+  audioTime += 0.02;
+  tick();
+  assert.ok(Math.abs(nodes["live-progress"].value - 0.02) < 0.000001);
   clocks.shift().callback();
   assert.equal(sent.deepgram.length, 2);
   assert.deepEqual(sent.deepgram, sent.gemini);
@@ -302,13 +316,16 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   assert.equal(clocks.length, 0);
   assert.equal(playing, true);
   playback.onended();
-  assert.equal(playing, false);
+  assert.equal(nodes["live-progress"].value, 0.04);
+  assert.equal(contextClosed, false);
   clocks.shift().callback();
   await Promise.resolve();
+  assert.equal(contextClosed, true);
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {
     assert.equal(panel.children[0].children[1].textContent, "Complete");
     assert.equal(panel.children[2].children[0].textContent, "\u0dc3\u0dd2");
+    assert.match(panel.children[3].textContent, /Final received .* after playback/);
   }
 });
 

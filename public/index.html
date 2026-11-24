@@ -58,16 +58,17 @@
 
     <section id="live" class="view" role="tabpanel" aria-labelledby="tab-live" tabindex="0" hidden>
       <div class="live-console console">
-        <div class="live-header"><h2>Live transcription</h2><span id="live-clock" class="capture-label">0:00</span></div>
+        <div class="live-header"><h2>Live transcription</h2><span id="live-clock" class="capture-label">0:00.0</span></div>
         <div class="live-controls">
           <div class="clip-select"><label for="live-recording">Recording</label><select id="live-recording"></select></div>
           <label class="file-action">Choose another audio file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
         </div>
         <div class="live-actions">
           <button class="play" id="live-mic" type="button">Start mic</button>
-          <button class="restart" id="live-stream" type="button">Stream recording</button>
+          <button class="restart" id="live-stream" type="button">Play &amp; stream</button>
           <button class="restart" id="live-stop" type="button" disabled>Stop</button>
         </div>
+        <progress id="live-progress" class="live-progress" max="1" value="0" aria-label="Recording playback position" hidden></progress>
         <p class="player-status" id="live-status" role="status">Recordings play and stream at 1×. Limit two minutes.</p>
       </div>
       <div class="live-view-tools">

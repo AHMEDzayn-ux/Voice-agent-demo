@@ -10,6 +10,11 @@
     ? new Intl.Segmenter("si", { granularity: "grapheme" })
     : null;
 
+  function elapsed(seconds) {
+    const tenths = Math.floor(Math.max(0, seconds) * 10);
+    return `${Math.floor(tenths / 600)}:${String(Math.floor(tenths / 10) % 60).padStart(2, "0")}.${tenths % 10}`;
+  }
+
   function normalizeSpacing(input) {
     return input.normalize("NFC").replace(/\s+/gu, " ").replace(/\s+([,.;:!?])/gu, "$1").trim();
   }
@@ -121,5 +126,5 @@
     };
   }
 
-  return { clean, parseGlossary, score, digitsChanged, observe, estimateCosts };
+  return { elapsed, clean, parseGlossary, score, digitsChanged, observe, estimateCosts };
 });

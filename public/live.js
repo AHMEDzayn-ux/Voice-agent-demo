@@ -4,6 +4,7 @@
   const get = (id) => document.getElementById(id);
   const { LiveWire: wire, BenchmarkCore: core } = window;
   if (!wire || !core) return;
+  const { elapsed } = core;
   const providerNames = { deepgram: "Nova-3", gemini: "Gemini 3.8 Live" };
   const durationLimit = 120;
   const sampleRate = 16000;
@@ -71,9 +72,11 @@
     transcript.lang = "si";
     transcript.tabIndex = 0;
     transcript.setAttribute("aria-label", `${label} live transcript`);
-    panel.append(header, metrics, transcript);
+    const timing = make("p", null, "transcript-foot");
+    timing.hidden = true;
+    panel.append(header, metrics, transcript, timing);
     get("live-feeds").append(panel);
-    states[provider] = { status, fields, transcript };
+    states[provider] = { status, fields, transcript, timing };
   }
 
   function render(run, provider) {
@@ -93,6 +96,29 @@
       if (observed.interim) ui.transcript.append(make("span", `${observed.raw ? " " : ""}${clean(observed.interim)}`, "interim"));
     }
     ui.transcript.scrollTop = ui.transcript.scrollHeight;
+    const latest = run.latest[provider];
+    ui.timing.hidden = !latest;
+    if (latest) {
+      const kind = latest.final ? "Final" : "Interim";
+      ui.timing.textContent = latest.position === null
+        ? `${kind} received at ${elapsed(latest.arrival)}${latest.afterPlayback ? " · after playback" : ""}`
+        : `${kind} received at recording ${elapsed(latest.position)}`;
+    }
+  }
+
+  function playbackPosition(run) {
+    const { duration, startedAt, ended, stoppedAt } = run.playback;
+    if (stoppedAt !== null) return stoppedAt;
+    if (ended) return duration;
+    if (startedAt === null) return 0;
+    const outputTime = run.context.getOutputTimestamp?.().contextTime ?? run.context.currentTime;
+    return Math.min(duration, Math.max(0, outputTime - startedAt));
+  }
+
+  function renderPlayback(run) {
+    const position = playbackPosition(run);
+    get("live-progress").value = position;
+    get("live-clock").textContent = `${elapsed(position)} / ${elapsed(run.playback.duration)}`;
   }
 
   function setBusy(busy) {
@@ -102,6 +128,10 @@
   }
 
   function releaseAudio(run) {
+    if (run.playback && run.playback.stoppedAt === null) {
+      run.playback.stoppedAt = playbackPosition(run);
+      renderPlayback(run);
+    }
     run.stream?.getTracks().forEach((track) => track.stop());
     if (run.context && run.context.state !== "closed") run.context.close().catch(() => {});
     clearInterval(run.clock);
@@ -180,6 +210,15 @@
           const events = wire.transcripts(provider, message, (performance.now() - run.started) / 1000);
           if (events.length) {
             run.events[provider].push(...events);
+            const latest = events.at(-1);
+            if (latest[1].trim()) {
+              const playback = run.playback;
+              const afterPlayback = Boolean(playback && (playback.ended || playback.stoppedAt !== null));
+              run.latest[provider] = {
+                arrival: latest[0], final: latest[2], afterPlayback,
+                position: playback && !afterPlayback ? playbackPosition(run) : null,
+              };
+            }
             render(run, provider);
           }
         } catch { /* Ignore unsupported provider messages. */ }
@@ -211,20 +250,22 @@
     playback.buffer = buffer;
     playback.connect(run.context.destination);
     let offset = 0;
-    let playbackEnded = false;
     playback.onended = () => {
-      playbackEnded = true;
-      if (current === run && offset >= pcm.length) stop();
+      if (current !== run || run.stopping) return;
+      run.playback.ended = true;
+      renderPlayback(run);
+      if (offset >= pcm.length) stop();
     };
 
     const startAt = performance.now();
-    playback.start();
+    run.playback.startedAt = run.context.currentTime;
+    playback.start(run.playback.startedAt);
     function next() {
       if (current !== run || run.stopping) return;
       sendFrame(run, pcm.slice(offset, offset + 320).buffer);
       offset += 320;
       if (offset >= pcm.length) {
-        if (playbackEnded) stop();
+        if (run.playback.ended) stop();
         return;
       }
       run.frameTimer = setTimeout(next, Math.max(0, offset / sampleRate * 1000 - (performance.now() - startAt)));
@@ -248,7 +289,7 @@
         run.worklet.port.postMessage("stop");
       });
     }
-    releaseAudio(run);
+    if (!run.playback?.ended) releaseAudio(run);
     const open = [];
     for (const [provider, socket] of Object.entries(run.sockets)) {
       if (socket.readyState === WebSocket.OPEN) {
@@ -273,10 +314,11 @@
     }
     const run = {
       started: null, stopping: false, sockets: {}, ready: new Set(), failed: new Set(),
-      events: { deepgram: [], gemini: [] }, controller: new AbortController(),
+      events: { deepgram: [], gemini: [] }, latest: {}, controller: new AbortController(),
     };
     current = lastRun = run;
-    get("live-clock").textContent = "0:00";
+    get("live-clock").textContent = "0:00.0";
+    get("live-progress").hidden = true;
     setBusy(true);
     get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
@@ -284,18 +326,25 @@
       render(run, provider);
     }
     try {
-      const context = new AudioContext({ sampleRate });
+      const context = mode === "recording" ? new AudioContext() : new AudioContext({ sampleRate });
       run.context = context;
       await context.resume();
       if (current !== run) return;
-      if (context.sampleRate !== sampleRate) throw new Error("This browser cannot provide 16 kHz capture.");
       let buffer;
       if (mode === "recording") {
         const source = file || await fetch(clip.audio, { signal: run.controller.signal });
         if (!file && !source.ok) throw new Error("Could not load the selected recording.");
-        buffer = await context.decodeAudioData(await source.arrayBuffer());
+        const decoder = new OfflineAudioContext(1, 1, sampleRate);
+        buffer = await decoder.decodeAudioData(await source.arrayBuffer());
+        if (current !== run) return;
         if (buffer.duration > durationLimit) throw new Error("Choose a recording no longer than two minutes.");
+        run.playback = { duration: buffer.duration, startedAt: null, ended: false, stoppedAt: null };
+        const progress = get("live-progress");
+        progress.max = buffer.duration;
+        renderPlayback(run);
+        progress.hidden = false;
       } else {
+        if (context.sampleRate !== sampleRate) throw new Error("This browser cannot provide 16 kHz capture.");
         const media = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
         if (current !== run) return media.getTracks().forEach((track) => track.stop());
         run.stream = media;
@@ -332,10 +381,11 @@
           if (performance.now() - waitingSince > 5000) stop("No audio reached the live streams.");
           return;
         }
-        const seconds = Math.floor((performance.now() - run.started) / 1000);
-        get("live-clock").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+        const seconds = (performance.now() - run.started) / 1000;
+        if (run.playback) renderPlayback(run);
+        else get("live-clock").textContent = elapsed(seconds);
         if (seconds >= durationLimit) stop("Two-minute test complete.");
-      }, 200);
+      }, 100);
       if (mode === "recording") fileFrames(run, buffer);
       else {
         const source = context.createMediaStreamSource(run.stream);
@@ -347,7 +397,7 @@
         source.connect(worklet).connect(silent).connect(context.destination);
       }
     } catch (error) {
-      const message = error.name === "NotAllowedError" ? "Microphone permission was denied."
+      const message = error.name === "NotAllowedError" ? (mode === "mic" ? "Microphone permission was denied." : "Your browser blocked playback.")
         : error.name === "EncodingError" ? "The browser could not decode that audio file."
           : error.name === "NotFoundError" ? "No microphone was found."
             : error.message;
@@ -367,7 +417,7 @@
     }
     localFile = file;
     refreshRecordings(localFileId);
-    get("live-status").textContent = "Audio file ready. Select Stream recording to run the live test.";
+    get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
   get("live-rules").addEventListener("change", () => {

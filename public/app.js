@@ -26,11 +26,6 @@ function element(tag, text, className) {
   return node;
 }
 
-function elapsed(seconds) {
-  const tenths = Math.floor(Math.max(0, seconds) * 10);
-  return `${Math.floor(tenths / 600)}:${String(Math.floor(tenths / 10) % 60).padStart(2, "0")}.${tenths % 10}`;
-}
-
 function latency(ms) {
   return ms == null ? "—" : `${(ms / 1000).toFixed(2)} s`;
 }
@@ -169,8 +164,8 @@ function updateLab(time, force = false) {
 
 function render(time) {
   slider.value = String(time);
-  slider.setAttribute("aria-valuetext", elapsed(time));
-  el("clock").textContent = elapsed(time);
+  slider.setAttribute("aria-valuetext", core.elapsed(time));
+  el("clock").textContent = core.elapsed(time);
   drawWave(time);
   for (const provider of providers) updateTranscript(provider, time);
   updateLab(time);
@@ -216,9 +211,9 @@ function chooseClip(id) {
   timelineEnd = clip.complete + Math.max(0, ...Object.values(clip.cleanup).map((item) => item?.text ? item.seconds : 0));
   audio.src = clip.audio;
   slider.max = String(timelineEnd);
-  el("duration").textContent = elapsed(timelineEnd);
+  el("duration").textContent = core.elapsed(timelineEnd);
   el("player-status").textContent = "Play the captured streams or scrub to any point.";
-  el("endpoint-info").textContent = `Estimated speech ${elapsed(clip.speechStart)}–${elapsed(clip.speechEnd)}`;
+  el("endpoint-info").textContent = `Estimated speech ${core.elapsed(clip.speechStart)}–${core.elapsed(clip.speechEnd)}`;
   el("reference").value = references.get(clip.scenario) || "";
   shown.clear();
   cleanupSignature = "";
