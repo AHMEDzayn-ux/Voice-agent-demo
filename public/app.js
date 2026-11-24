@@ -17,6 +17,7 @@ let frame = 0;
 let tail = null;
 let glossary = [];
 let cleanupSignature = "";
+let privateAudioUrls = [];
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -275,13 +276,21 @@ function showResults() {
 }
 
 function setupViews() {
-  const views = ["replay", "cleanup", "benchmark"];
+  const views = ["replay", "live", "cleanup", "benchmark"];
   const fromHash = () => {
     const name = window.location.hash.slice(1);
     if (name === "method" || name === "decision") return "benchmark";
     return views.includes(name) ? name : "replay";
   };
   function activate(name, updateHash = false) {
+    el("replay-console").hidden = name === "live";
+    if (name !== "live") window.LiveBench?.stop();
+    else if (isPlaying()) {
+      if (tail) tail = { seconds: position(), startedAt: null };
+      else audio.pause();
+      syncButton();
+      refresh();
+    }
     for (const view of views) {
       const selected = view === name;
       el(view).hidden = !selected;
@@ -359,20 +368,53 @@ function renderMetrics(data) {
 function updateCost() {
   const value = (id) => {
     const field = el(id);
-    return field.value !== "" && field.checkValidity() ? Number(field.value) : null;
+    return field.value !== "" && field.checkValidity() ? Number(field.value) : NaN;
   };
-  const minutes = value("minutes");
-  const calls = value("calls");
-  const llm = value("llm-cost");
+  const estimates = core.estimateCosts(value("minutes"), value("reply-minutes"), value("cleanup-requests"));
   const usd = new Intl.NumberFormat("en", { style: "currency", currency: "USD" });
-  const output = providers.flatMap((p) => {
-    const rate = value(`${p.id}-cost`);
-    if (minutes == null || rate == null) return [];
-    const subtotal = minutes * rate;
-    const total = calls == null || llm == null ? "" : ` · with all calls cleaned ${usd.format(subtotal + calls * llm)}`;
-    return [`${p.label} ${usd.format(subtotal)}/month${total}`];
+  const format = (value) => estimates ? `${usd.format(value)}/mo` : "—";
+  el("cost-nova").textContent = format(estimates?.nova);
+  el("cost-gemini").textContent = format(estimates && estimates.geminiInput + estimates.geminiOutput);
+  el("cost-cleanup").textContent = format(estimates?.cleanup);
+  el("cost-breakdown").textContent = estimates
+    ? `Gemini audio subtotal: ${usd.format(estimates.geminiInput)} caller input + ${usd.format(estimates.geminiOutput)} spoken output. Cleanup is an optional add-on to either path.`
+    : "Enter valid, non-negative monthly usage in all three fields.";
+}
+
+function validatePrivatePack(pack) {
+  const finiteSeconds = (value) => Number.isFinite(value) && value >= 0 && value <= 300;
+  if (pack?.version !== 1 || !Array.isArray(pack.calls) || pack.calls.length < 1 || pack.calls.length > 10) {
+    throw new Error("This file is not a real-call replay pack.");
+  }
+  return pack.calls.map((call, index) => {
+    const audioData = call.audioBase64;
+    if (typeof audioData !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(audioData) ||
+        !finiteSeconds(call.duration) || call.duration === 0 || !finiteSeconds(call.speechStart) ||
+        !finiteSeconds(call.speechEnd) || call.speechStart > call.speechEnd || call.speechEnd > call.duration ||
+        !Array.isArray(call.wave) || call.wave.length !== 160 ||
+        !call.wave.every((point) => Number.isFinite(point) && point >= 0 && point <= 1)) {
+      throw new Error("A real-call replay entry has invalid audio or timing.");
+    }
+    const feeds = {};
+    for (const { id } of providers) {
+      const feed = call.events?.[id];
+      if (!Array.isArray(feed) || feed.length > 2000 || !feed.every((event, i) =>
+        Array.isArray(event) && finiteSeconds(event[0]) && (i === 0 || event[0] >= feed[i - 1][0]) &&
+        typeof event[1] === "string" && event[1].length <= 4000 && typeof event[2] === "boolean"
+      )) throw new Error("A real-call transcript feed is invalid.");
+      feeds[id] = feed;
+    }
+    const label = `Real call ${index + 1}`;
+    const id = `private/${index + 1}`;
+    return {
+      id, scenario: id, scenarioLabel: label, condition: "original", label: "Original audio",
+      audioData, duration: call.duration, speechStart: call.speechStart, speechEnd: call.speechEnd,
+      wave: call.wave, events: feeds, cleanup: {},
+      complete: Math.max(call.duration, ...Object.values(feeds).flat().map((event) => event[0])),
+      raw: Object.fromEntries(providers.map(({ id: p }) => [p, core.observe(feeds[p], Infinity).raw])),
+      outcomes: Object.fromEntries(providers.map(({ id: p }) => [p, feeds[p].length ? "Captured replay" : "No text"])),
+    };
   });
-  el("cost-result").textContent = output.join("  |  ") || "Enter valid provider rates to get an estimate.";
 }
 
 setupViews();
@@ -381,11 +423,15 @@ if (window.DEMO_DATA && core) {
   const { clips, metrics } = window.DEMO_DATA;
   const choices = el("clip");
   const scenarios = el("scenario");
-  for (const [id, label] of new Map(clips.map((item) => [item.scenario, item.scenarioLabel]))) {
-    const option = element("option", label);
-    option.value = id;
-    scenarios.append(option);
-  }
+  const fillScenarios = () => {
+    scenarios.replaceChildren();
+    for (const [id, label] of new Map(clips.map((item) => [item.scenario, item.scenarioLabel]))) {
+      const option = element("option", label);
+      option.value = id;
+      scenarios.append(option);
+    }
+  };
+  fillScenarios();
   const changeScenario = () => {
     const previous = clip?.condition;
     choices.replaceChildren();
@@ -401,6 +447,37 @@ if (window.DEMO_DATA && core) {
   };
   scenarios.addEventListener("change", changeScenario);
   choices.addEventListener("change", () => chooseClip(choices.value));
+  el("load-real").addEventListener("change", async ({ target }) => {
+    const file = target.files?.[0];
+    if (!file) return;
+    const urls = [];
+    try {
+      if (file.size > 8000000) throw new Error("Choose a replay file under 8 MB.");
+      const calls = validatePrivatePack(JSON.parse(await file.text()));
+      for (const call of calls) {
+        const { audioData } = call;
+        call.audio = URL.createObjectURL(new Blob(
+          [Uint8Array.from(atob(audioData), (char) => char.charCodeAt(0))], { type: "audio/mpeg" }
+        ));
+        delete call.audioData;
+        urls.push(call.audio);
+      }
+      const visibleClips = clips.filter((entry) => !entry.id.startsWith("private/"));
+      clips.splice(0, clips.length, ...visibleClips, ...calls);
+      for (const id of references.keys()) if (id.startsWith("private/")) references.delete(id);
+      fillScenarios();
+      scenarios.value = calls[0].scenario;
+      changeScenario();
+      for (const url of privateAudioUrls) URL.revokeObjectURL(url);
+      privateAudioUrls = urls;
+      el("player-status").textContent = `Loaded ${calls.length} real-call replays in this tab.`;
+    } catch (error) {
+      for (const url of urls) URL.revokeObjectURL(url);
+      el("player-status").textContent = error instanceof SyntaxError ? "Choose a valid real-call replay file." : error.message;
+    } finally {
+      target.value = "";
+    }
+  });
   el("cleanup-provider").addEventListener("change", () => updateLab(position(), true));
   el("reference").addEventListener("input", () => {
     references.set(clip.scenario, el("reference").value);
@@ -416,7 +493,7 @@ if (window.DEMO_DATA && core) {
     }
     updateLab(position(), true);
   });
-  for (const id of ["minutes", "calls", "deepgram-cost", "gemini-cost", "llm-cost"]) {
+  for (const id of ["minutes", "reply-minutes", "cleanup-requests"]) {
     el(id).addEventListener("input", updateCost);
   }
   el("play").addEventListener("click", togglePlayback);
@@ -437,6 +514,7 @@ if (window.DEMO_DATA && core) {
   window.addEventListener("resize", () => drawWave(position()));
   changeScenario();
   renderMetrics(metrics);
+  updateCost();
 } else {
   el("player-status").textContent = "The demo data could not be loaded.";
   for (const id of ["play", "restart", "results", "position", "clip", "scenario"]) el(id).disabled = true;

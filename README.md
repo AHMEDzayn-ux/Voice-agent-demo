@@ -8,11 +8,22 @@ A static benchmark demo comparing Deepgram Nova‑3 and Gemini 3.8 Live for a Si
 2. Use **Streams** to watch both providers side by side. Play the 1× replay or scrub the waveform. **Show results** jumps to the full outputs.
 3. Open **Cleanup** to compare **Raw**, **Deterministic**, and **LLM cleanup** for either provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
 4. Paste a human-verified reference for the selected scenario to reveal CER and WER once the transcripts finish. Optionally enter approved terms as `heard term => approved term`, one per line. The reference and glossary stay in the browser tab.
-5. Open **Benchmarks** for the three-call pilot, rollout checks, and optional cost calculator. Accuracy scores need verified references.
+5. Open **Benchmarks** for the three-call pilot, rollout checks, and a price-sourced USD calculator. Accuracy scores need verified references.
+6. Choose **Load real calls** and select the separate private replay file from your computer. The tab loads the recording and captured transcripts locally. Keep the file outside the repository and deployment.
 
 ## Deploy to Vercel
 
-Import this repository and deploy `main`. Use **Other** if Vercel asks for a framework. The repository config selects `public` as the output directory. Leave the build command blank and the root directory at the repository root. The demo requires no API keys or environment variables.
+Import this repository and deploy `main`. Use **Other** if Vercel asks for a framework. The repository config serves `public` and the runtime endpoint lives in `api`. Keep the root directory at the repository root and the build command blank. The replay and calculator work without configured credentials.
+
+### Enable the Live test
+
+Set these server-side environment variables in the Vercel project, then redeploy:
+
+- `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
+- `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
+- `LIVE_TEST_PASSCODE` — a private, randomly generated passcode of at least 16 characters. Give it only to people authorized to run billable tests.
+
+Open **Live test**, enter the passcode, and start the mic or stream an audio file up to two minutes. The browser sends the same 16 kHz mono packets directly to each ready provider. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Deployed test sessions use your providers' quotas and billing.
 
 ## Preview and test
 
@@ -28,4 +39,4 @@ Open [localhost:8080](http://localhost:8080). Run the dependency-free checks wit
 node --test
 ```
 
-The replay contains simulated audio and captured outputs. The real-call section contains only anonymized numerical measurements. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.
+The replay contains simulated audio and captured outputs. The deployed real-call section contains only anonymized numerical measurements. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.

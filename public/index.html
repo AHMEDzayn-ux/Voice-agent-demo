@@ -9,7 +9,9 @@
   <link rel="stylesheet" href="style.css">
   <script src="assets/demo-data.js" defer></script>
   <script src="demo-core.js" defer></script>
+  <script src="live-wire.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="live.js" defer></script>
 </head>
 <body>
   <header class="masthead">
@@ -17,19 +19,23 @@
       <div class="wordmark"><span class="brand-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><h1>Sinhala STT benchmark</h1></div>
       <div class="view-tabs" role="tablist" aria-label="Comparison views">
         <button type="button" id="tab-replay" role="tab" aria-selected="true" aria-controls="replay">Streams</button>
+        <button type="button" id="tab-live" role="tab" aria-selected="false" aria-controls="live" tabindex="-1">Live test</button>
         <button type="button" id="tab-cleanup" role="tab" aria-selected="false" aria-controls="cleanup" tabindex="-1">Cleanup</button>
         <button type="button" id="tab-benchmark" role="tab" aria-selected="false" aria-controls="benchmark" tabindex="-1">Benchmarks</button>
       </div>
     </div>
   </header>
   <main class="wrap workspace">
-    <section class="console" aria-label="Shared replay controls">
+    <section class="console" id="replay-console" aria-label="Shared replay controls">
         <div class="console-heading">
           <div class="selectors">
             <div class="clip-select"><label for="scenario">Call scenario</label><select id="scenario"></select></div>
             <div class="clip-select"><label for="clip">Audio condition</label><select id="clip"></select></div>
           </div>
-          <span class="capture-label">Captured WebSocket replay · 1×</span>
+          <div class="replay-tools">
+            <span class="capture-label">Captured WebSocket replay · 1×</span>
+            <label class="file-action">Load real calls<input id="load-real" type="file" accept=".json,application/json" aria-label="Load real call replay file"></label>
+          </div>
         </div>
         <div class="player">
           <button class="play" id="play" type="button"><span id="play-label">Play</span><span class="play-icon" aria-hidden="true"></span></button>
@@ -48,6 +54,27 @@
           <p id="player-status" role="status" class="player-status">Play the audio to replay the captured transcript events.</p>
           <span id="endpoint-info"></span>
         </div>
+    </section>
+
+    <section id="live" class="view" role="tabpanel" aria-labelledby="tab-live" tabindex="0" hidden>
+      <div class="live-console console">
+        <div class="live-header"><h2>Live microphone or file</h2><span id="live-clock" class="capture-label">0:00</span></div>
+        <div class="live-controls">
+          <label>Demo passcode<input id="live-passcode" type="password" maxlength="256" autocomplete="off" placeholder="Enter the site passcode"></label>
+          <label>Optional audio file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
+        </div>
+        <div class="live-actions">
+          <button class="play" id="live-mic" type="button">Start mic</button>
+          <button class="restart" id="live-upload" type="button">Stream file</button>
+          <button class="restart" id="live-stop" type="button" disabled>Stop</button>
+        </div>
+        <p class="player-status" id="live-status" role="status">Audio goes directly to both providers. Sessions are limited to two minutes.</p>
+      </div>
+      <div class="live-view-tools">
+        <span>Times start at the first audio packet.</span>
+        <label><input id="live-rules" type="checkbox"> Apply deterministic cleanup</label>
+      </div>
+      <div id="live-feeds" class="transcripts"></div>
     </section>
 
     <section id="replay" class="view" role="tabpanel" aria-labelledby="tab-replay" tabindex="0">
@@ -110,21 +137,26 @@
       <details class="per-call" id="decision">
         <summary>Call-center rollout checks</summary>
         <div class="decision-grid">
-          <article class="decision-card"><h3>Responsiveness</h3><p>Compare first and final text during pauses and over G.711. Measure end-of-turn to agent audio in your own stack.</p></article>
-          <article class="decision-card"><h3>Accuracy and safety</h3><p>Score verified calls by noise and language mix. Check names, numbers, negation and English terms.</p></article>
+          <article class="decision-card"><h3>Nova-3 in a voice agent</h3><p>Nova-3 streams Sinhala text. Use pause-based endpointing with your own turn and interruption logic. Deepgram's turn-aware Flux STT does not currently list Sinhala. <a href="https://developers.deepgram.com/docs/models-languages-overview">Model coverage</a></p></article>
+          <article class="decision-card"><h3>Accuracy and cleanup</h3><p>The default formatting rules changed 0 of 12 simulated outputs. Test approved glossary corrections on verified calls before enabling automatic replacements.</p></article>
           <article class="decision-card"><h3>Reliability and cost</h3><p>Track dropped sessions, no-text cases and p95 latency at peak concurrency. Price audio, model output and cleanup.</p></article>
         </div>
       </details>
       <details class="per-call cost-panel">
         <summary>Estimate monthly processing cost</summary>
+        <p class="section-note">Published USD rates checked <time datetime="2026-11-25">November 25, 2026</time>. Enter your expected volumes.</p>
         <div class="cost-inputs">
-          <label>Minutes per month<input id="minutes" type="number" min="0" value="10000"></label>
-          <label>Calls per month<input id="calls" type="number" min="0" value="2000"></label>
-          <label>Nova-3 USD per minute<input id="deepgram-cost" type="number" min="0" step="0.0001" placeholder="Your rate"></label>
-          <label>Gemini USD per minute<input id="gemini-cost" type="number" min="0" step="0.0001" placeholder="Your rate"></label>
-          <label>LLM USD per cleaned call<input id="llm-cost" type="number" min="0" step="0.0001" placeholder="Your rate"></label>
+          <label>Caller audio minutes / month<input id="minutes" type="number" min="0" step="any" value="10000"></label>
+          <label>Gemini reply audio minutes / month<input id="reply-minutes" type="number" min="0" step="any" value="3000"></label>
+          <label>Optional cleanup requests / month<input id="cleanup-requests" type="number" min="0" step="1" value="2000"></label>
         </div>
-        <p id="cost-result">Enter your provider rates to get an estimate.</p>
+        <ul class="cost-results" id="cost-result" aria-live="polite">
+          <li><span>Nova-3 transcription</span><strong id="cost-nova">—</strong></li>
+          <li><span>Gemini Live audio</span><strong id="cost-gemini">—</strong></li>
+          <li><span>Flash-Lite cleanup</span><strong id="cost-cleanup">—</strong></li>
+        </ul>
+        <p class="section-note" id="cost-breakdown"></p>
+        <p class="section-note"><a href="https://deepgram.com/pricing#speech-to-text">Nova-3</a> uses the $0.0048/min monolingual streaming promo rate. <a href="https://aistudio.google.com/docs/pricing#gemini-3.8-live">Gemini Live</a> audio uses $3/M input and $12/M output tokens at an assumed 25 tokens/sec. Text, retained context, and thinking can add charges. <a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Flash-Lite</a> uses $0.30/M text input and $2.50/M output tokens with usage from 12 captured requests. Telephony, and the separate agent LLM and TTS for Nova-3, are outside these figures.</p>
       </details>
       <details id="method" class="per-call method">
         <summary>How we measured</summary>

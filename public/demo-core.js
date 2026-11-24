@@ -79,19 +79,47 @@
 
   function observe(events, time) {
     const visible = events.filter((event) => event[0] <= time);
-    const finalized = visible.filter((event) => event[2]);
+    const nonempty = visible.filter((event) => event[1].trim());
+    const finalized = nonempty.filter((event) => event[2]);
     const latest = visible.at(-1);
     return {
       count: visible.length,
       raw: finalized.map((event) => event[1]).join(" ").trim(),
       interim: latest && !latest[2] ? latest[1] : "",
-      interimCount: visible.length - finalized.length,
-      first: visible[0]?.[0] ?? null,
-      firstSinhala: visible.find((event) => /\p{Script=Sinhala}/u.test(event[1]))?.[0] ?? null,
+      interimCount: nonempty.length - finalized.length,
+      first: nonempty[0]?.[0] ?? null,
+      firstSinhala: nonempty.find((event) => /\p{Script=Sinhala}/u.test(event[1]))?.[0] ?? null,
       firstFinal: finalized[0]?.[0] ?? null,
       lastFinal: finalized.at(-1)?.[0] ?? null,
     };
   }
 
-  return { clean, parseGlossary, score, digitsChanged, observe };
+  const prices = Object.freeze({
+    novaPerMinute: 0.0048,
+    liveInputPerMillion: 3,
+    liveOutputPerMillion: 12,
+    audioTokensPerSecond: 25,
+    cleanupInputPerMillion: 0.30,
+    cleanupOutputPerMillion: 2.50,
+    cleanupInputTokens: 2568,
+    cleanupOutputTokens: 1718,
+    cleanupRequests: 12,
+  });
+
+  function estimateCosts(callerMinutes, replyMinutes, requests) {
+    if (![callerMinutes, replyMinutes, requests].every((value) => Number.isFinite(value) && value >= 0)) return null;
+    const million = 1000000;
+    const tokensPerMinute = prices.audioTokensPerSecond * 60;
+    return {
+      nova: callerMinutes * prices.novaPerMinute,
+      geminiInput: callerMinutes * tokensPerMinute * prices.liveInputPerMillion / million,
+      geminiOutput: replyMinutes * tokensPerMinute * prices.liveOutputPerMillion / million,
+      cleanup: requests * (
+        prices.cleanupInputTokens * prices.cleanupInputPerMillion +
+        prices.cleanupOutputTokens * prices.cleanupOutputPerMillion
+      ) / (prices.cleanupRequests * million),
+    };
+  }
+
+  return { clean, parseGlossary, score, digitsChanged, observe, estimateCosts };
 });
