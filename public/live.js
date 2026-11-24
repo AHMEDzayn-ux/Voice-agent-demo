@@ -207,13 +207,26 @@
       const value = Math.max(-1, Math.min(1, total / channels.length));
       pcm[i] = value * (value < 0 ? 32768 : 32767);
     }
+    const playback = run.context.createBufferSource();
+    playback.buffer = buffer;
+    playback.connect(run.context.destination);
     let offset = 0;
+    let playbackEnded = false;
+    playback.onended = () => {
+      playbackEnded = true;
+      if (current === run && offset >= pcm.length) stop();
+    };
+
     const startAt = performance.now();
+    playback.start();
     function next() {
       if (current !== run || run.stopping) return;
-      if (offset >= pcm.length) return stop();
       sendFrame(run, pcm.slice(offset, offset + 320).buffer);
       offset += 320;
+      if (offset >= pcm.length) {
+        if (playbackEnded) stop();
+        return;
+      }
       run.frameTimer = setTimeout(next, Math.max(0, offset / sampleRate * 1000 - (performance.now() - startAt)));
     }
     next();
@@ -312,7 +325,7 @@
       const destination = activeProviders.map((provider) => providerNames[provider]).join(" and ");
       get("live-status").textContent = mode === "mic"
         ? `Streaming your microphone to ${destination}…`
-        : `Streaming the recording at 1× to ${destination}…`;
+        : `Playing and streaming the recording at 1× to ${destination}…`;
       const waitingSince = performance.now();
       run.clock = setInterval(() => {
         if (run.started === null) {

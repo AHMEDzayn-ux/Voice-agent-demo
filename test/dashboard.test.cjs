@@ -191,9 +191,15 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("a selected real call streams fresh, identical 20 ms packets to both providers", async () => {
+test("a selected real call plays while identical 20 ms packets stream to both providers", async () => {
   const sent = { deepgram: [], gemini: [] };
   const clocks = [];
+  let playing = false;
+  const destination = {};
+  const playback = {
+    connect(output) { assert.equal(output, destination); },
+    start() { playing = true; },
+  };
   class Socket extends EventTarget {
     static OPEN = 1;
     static CLOSING = 2;
@@ -225,16 +231,25 @@ test("a selected real call streams fresh, identical 20 ms packets to both provid
           : { serverContent: { inputTranscription: { text } } });
         return;
       }
+      assert.ok(playing);
       sent[this.provider].push(message
         ? Buffer.from(message.realtimeInput.audio.data, "base64") : Buffer.from(payload));
+      if (sent[this.provider].length === 1) {
+        const text = "\u0dc3";
+        this.emit(this.provider === "deepgram"
+          ? { type: "Results", is_final: false, channel: { alternatives: [{ transcript: text }] } }
+          : { serverContent: { interimInputTranscription: { text } } });
+      }
     }
     close() { this.readyState = Socket.CLOSING; }
   }
   class TestAudioContext {
     state = "running";
     sampleRate = 16000;
+    destination = destination;
     async resume() {}
-    async close() { this.state = "closed"; }
+    async close() { this.state = "closed"; playing = false; }
+    createBufferSource() { return playback; }
     async decodeAudioData() {
       return {
         length: 640, numberOfChannels: 1, duration: 0.04,
@@ -269,13 +284,22 @@ test("a selected real call streams fresh, identical 20 ms packets to both provid
   nodes["live-recording"].value = "real-call-3";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
+  assert.equal(playback.buffer.length, 640);
+  assert.equal(playing, true);
+  assert.match(nodes["live-status"].textContent, /Playing and streaming/);
+  for (const panel of nodes["live-feeds"].children) {
+    assert.equal(panel.children[2].children[0].textContent, "\u0dc3");
+  }
   assert.equal(sent.deepgram.length, 1);
   assert.equal(clocks[0].delay, 20);
   clocks.shift().callback();
   assert.equal(sent.deepgram.length, 2);
   assert.deepEqual(sent.deepgram, sent.gemini);
   assert.equal(sent.deepgram[0].byteLength, 640);
-  clocks.shift().callback();
+  assert.equal(clocks.length, 0);
+  assert.equal(playing, true);
+  playback.onended();
+  assert.equal(playing, false);
   clocks.shift().callback();
   await Promise.resolve();
   assert.match(nodes["live-status"].textContent, /complete/i);

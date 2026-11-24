@@ -22,7 +22,7 @@ Set one or both of these server-side environment variables in the Vercel project
 - `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
 
-Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The picker includes three original call recordings and six simulated recordings. Use **Choose another audio file** to select a different file from your device. When you start the test, the browser sends identical 20 ms packets of 16 kHz mono audio directly to each connected provider at normal speed for fresh transcripts. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
+Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The picker includes three original call recordings and six simulated recordings. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser sends the audio directly to each connected provider at normal speed in identical 20 ms packets of 16 kHz mono audio. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
 ## Preview and test
 
