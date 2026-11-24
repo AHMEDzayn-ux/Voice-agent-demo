@@ -1,6 +1,6 @@
 # Sinhala STT for live calls
 
-A static benchmark demo comparing Deepgram Nova‑3 and Gemini 3.8 Live for a Sinhala call-center voice agent.
+A benchmark demo for Sinhala call-center speech recognition. Live test compares Deepgram Nova‑3, Gemini 3.8 Live, and OpenAI GPT Live Transcribe.
 
 ## Present the demo
 
@@ -17,12 +17,15 @@ Import this repository and deploy `main`. Use **Other** if Vercel asks for a fra
 
 ### Enable the Live test
 
-Set one or both of these server-side environment variables in the Vercel project, then redeploy. Both are needed for a side-by-side test.
+Set the server-side environment variables for the providers you want to test in Vercel, then redeploy.
 
 - `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
+- `OPENAI_API_KEY` — an OpenAI API project key with access to `gpt-live-transcribe`. [Create an API key](https://platform.openai.com/api-keys) and check [API billing](https://platform.openai.com/settings/organization/billing/overview).
 
-Open **Live test** and choose **Start mic** or select a simulated recording and choose **Play & stream**. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser sends the audio directly to each connected provider at normal speed in identical 20 ms packets of 16 kHz mono audio. The playback clock shows where you are in the recording. Each provider panel shows the playback position when its latest text arrived, or flags text that came in after playback. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
+Open **Live test** and choose **Start mic** or select a simulated recording and choose **Play & stream**. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser streams the same mono audio to each connected provider in 20 ms packets. Deepgram and Gemini receive 16 kHz audio. OpenAI receives the same signal resampled to 24 kHz and detects the language automatically. The browser commits OpenAI turns after an estimated 400 ms speech pause or every 10 seconds of uninterrupted audio, which can affect first-final latency. Each provider panel shows the playback position when its latest text arrived and flags text that came in after playback.
+
+Sessions last up to two minutes. Vercel issues short-lived client tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
 Compare **Pauses and restarts · Clean recording** with its fan and office variants. Each mix uses the same speech and timing. The added noise level gives a 10 dB signal-to-noise ratio over speech intervals estimated with Silero VAD. The fan and office source recordings are CC0. [Computer Fan Loop by Ezcah](https://freesound.org/people/Ezcah/sounds/242042/) and [Office Ambience by DiArchangeli](https://freesound.org/people/DiArchangeli/sounds/108695/).
 

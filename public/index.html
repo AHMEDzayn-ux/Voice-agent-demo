@@ -154,10 +154,11 @@
         <ul class="cost-results" id="cost-result" aria-live="polite">
           <li><span>Nova-3 transcription</span><strong id="cost-nova">—</strong></li>
           <li><span>Gemini Live audio</span><strong id="cost-gemini">—</strong></li>
+          <li><span>GPT Live Transcribe</span><strong id="cost-openai">—</strong></li>
           <li><span>Flash-Lite cleanup</span><strong id="cost-cleanup">—</strong></li>
         </ul>
         <p class="section-note" id="cost-breakdown"></p>
-        <p class="section-note"><a href="https://deepgram.com/pricing#speech-to-text">Nova-3</a> uses the $0.0048/min monolingual streaming promo rate. <a href="https://aistudio.google.com/docs/pricing#gemini-3.8-live">Gemini Live</a> audio uses $3/M input and $12/M output tokens at an assumed 25 tokens/sec. Text, retained context, and thinking can add charges. <a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Flash-Lite</a> uses $0.30/M text input and $2.50/M output tokens with usage from 12 captured requests. Telephony, and the separate agent LLM and TTS for Nova-3, are outside these figures.</p>
+        <p class="section-note"><a href="https://deepgram.com/pricing#speech-to-text">Nova-3</a> uses the $0.0048/min monolingual streaming promo rate. <a href="https://aistudio.google.com/docs/pricing#gemini-3.8-live">Gemini Live</a> audio uses $3/M input and $12/M output tokens at an assumed 25 tokens/sec. Text, retained context, and thinking can add charges. <a href="https://developers.openai.com/api/docs/models/gpt-live-transcribe">GPT Live Transcribe</a> costs $0.017 per caller audio minute. <a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Flash-Lite</a> uses $0.30/M text input and $2.50/M output tokens with usage from 12 captured requests. Telephony and separate agent LLM and TTS costs are outside these figures.</p>
       </details>
       <details id="method" class="per-call method">
         <summary>How we measured</summary>

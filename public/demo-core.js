@@ -101,6 +101,7 @@
 
   const prices = Object.freeze({
     novaPerMinute: 0.0048,
+    openaiPerMinute: 0.017,
     liveInputPerMillion: 3,
     liveOutputPerMillion: 12,
     audioTokensPerSecond: 25,
@@ -117,6 +118,7 @@
     const tokensPerMinute = prices.audioTokensPerSecond * 60;
     return {
       nova: callerMinutes * prices.novaPerMinute,
+      openai: callerMinutes * prices.openaiPerMinute,
       geminiInput: callerMinutes * tokensPerMinute * prices.liveInputPerMillion / million,
       geminiOutput: replyMinutes * tokensPerMinute * prices.liveOutputPerMillion / million,
       cleanup: requests * (

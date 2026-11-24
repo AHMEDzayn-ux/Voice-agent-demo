@@ -97,6 +97,7 @@ test("comparison tabs are exclusive, keyboard-accessible, and preserve playback"
 test("price calculator uses published units and captured cleanup usage", () => {
   const result = core.estimateCosts(10000, 3000, 2000);
   assert.equal(result.nova.toFixed(2), "48.00");
+  assert.equal(result.openai.toFixed(2), "170.00");
   assert.equal(result.geminiInput, 45);
   assert.equal(result.geminiOutput, 54);
   assert.equal(result.cleanup.toFixed(2), "0.84");
@@ -104,6 +105,7 @@ test("price calculator uses published units and captured cleanup usage", () => {
   const { nodes } = initDashboard();
   assert.equal(nodes["cost-nova"].textContent, "$48.00/mo");
   assert.equal(nodes["cost-gemini"].textContent, "$99.00/mo");
+  assert.equal(nodes["cost-openai"].textContent, "$170.00/mo");
   assert.equal(nodes["cost-cleanup"].textContent, "$0.84/mo");
   nodes["reply-minutes"].value = "0";
   nodes["reply-minutes"].callbacks.input();
@@ -135,7 +137,7 @@ test("live view offers bundled recordings and can select a local file without st
   nodes["tab-live"].callbacks.click();
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
-  assert.equal(nodes["live-feeds"].children.length, 2);
+  assert.equal(nodes["live-feeds"].children.length, 3);
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
   const recordings = nodes["live-recording"];
@@ -171,6 +173,35 @@ test("live wire sends identical PCM and ignores empty transcript results", () =>
   assert.equal(gemini.url.searchParams.get("access_token"), "auth_tokens/test");
 });
 
+test("OpenAI input keeps the resampling phase and commits speech at a pause", () => {
+  const input = wire.openaiInput();
+  const readSamples = (packet) => {
+    const bytes = Buffer.from(JSON.parse(packet).audio, "base64");
+    return Array.from({ length: bytes.length / 2 }, (_, index) => bytes.readInt16LE(index * 2));
+  };
+  assert.deepEqual(readSamples(input.append(new Int16Array([0]).buffer)[0]), [0]);
+  assert.deepEqual(readSamples(input.append(new Int16Array([3000]).buffer)[0]), [1000, 3000]);
+
+  const turn = wire.openaiInput();
+  assert.equal(turn.append(new Int16Array(320).fill(6000).buffer).length, 1);
+  for (let i = 0; i < 19; i++) assert.equal(turn.append(new Int16Array(320).buffer).length, 1);
+  const packets = turn.append(new Int16Array(320).buffer);
+  assert.equal(JSON.parse(packets[1]).type, "input_audio_buffer.commit");
+  assert.deepEqual(turn.finish(), []);
+});
+
+test("OpenAI joins deltas and keeps committed turn order when finals arrive out of order", () => {
+  const transcript = wire.openaiTranscript();
+  transcript.read({ type: "input_audio_buffer.committed", item_id: "one" }, 1);
+  transcript.read({ type: "input_audio_buffer.committed", item_id: "two", previous_item_id: "one" }, 2);
+  transcript.read({ type: "conversation.item.input_audio_transcription.delta", item_id: "one", delta: "Hel" }, 2.2);
+  assert.deepEqual(transcript.read({ type: "conversation.item.input_audio_transcription.delta", item_id: "one", delta: "lo" }, 2.4), [[2.4, "Hello", false]]);
+  assert.deepEqual(transcript.text(), { raw: "", interim: "Hello" });
+  transcript.read({ type: "conversation.item.input_audio_transcription.completed", item_id: "two", transcript: "Second" }, 3);
+  transcript.read({ type: "conversation.item.input_audio_transcription.completed", item_id: "one", transcript: "First" }, 4);
+  assert.deepEqual(transcript.text(), { raw: "First Second", interim: "" });
+});
+
 test("microphone worklet produces 20 ms PCM packets and flushes its tail", () => {
   const packets = [];
   const AudioWorkletProcessor = class {
@@ -194,8 +225,8 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("a noisy recording plays while identical 20 ms packets stream to both providers", async () => {
-  const sent = { deepgram: [], gemini: [] };
+test("a noisy recording plays and streams to all three providers", async () => {
+  const sent = { deepgram: [], gemini: [], openai: [] };
   const clocks = [];
   let tick;
   let audioTime = 1;
@@ -211,9 +242,13 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
     static CLOSING = 2;
     readyState = 0;
     bufferedAmount = 0;
-    constructor(url) {
+    constructor(url, protocols) {
       super();
-      this.provider = url.hostname.startsWith("api.deepgram") ? "deepgram" : "gemini";
+      this.provider = { "api.deepgram.com": "deepgram", "api.openai.com": "openai" }[url.hostname] || "gemini";
+      if (this.provider === "openai") {
+        assert.equal(url.searchParams.get("intent"), "transcription");
+        assert.deepEqual(Array.from(protocols), ["realtime", "openai-insecure-api-key.ek_test"]);
+      }
       queueMicrotask(() => {
         this.readyState = Socket.OPEN;
         this.dispatchEvent(new Event("open"));
@@ -226,6 +261,21 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
     }
     send(payload) {
       const message = typeof payload === "string" ? JSON.parse(payload) : null;
+      if (message?.type === "session.update") {
+        assert.equal(message.session.type, "transcription");
+        this.emit({ type: "session.updated" });
+        return;
+      }
+      if (message?.type === "input_audio_buffer.commit") {
+        this.emit({ type: "input_audio_buffer.committed", item_id: "turn-1" });
+        this.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "turn-1", transcript: "\u0dc3\u0dd2" });
+        return;
+      }
+      if (message?.type === "input_audio_buffer.append") {
+        sent.openai.push(Buffer.from(message.audio, "base64"));
+        if (sent.openai.length === 1) this.emit({ type: "conversation.item.input_audio_transcription.delta", item_id: "turn-1", delta: "\u0dc3" });
+        return;
+      }
       if (message?.setup) {
         queueMicrotask(() => this.emit({ setupComplete: {} }));
         return;
@@ -278,8 +328,9 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
       assert.equal(options.method, "POST");
       assert.equal(options.body, undefined);
       return { ok: true, json: async () => ({
-        tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test" },
+        tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test", openai: "ek_test" },
         geminiSetup: { model: "models/gemini-3.8-live" },
+        openaiSetup: { type: "transcription" },
       }) };
     },
     setInterval(callback) { tick = callback; return 0; },
@@ -313,9 +364,13 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   assert.equal(sent.deepgram.length, 2);
   assert.deepEqual(sent.deepgram, sent.gemini);
   assert.equal(sent.deepgram[0].byteLength, 640);
+  assert.equal(sent.openai.length, 2);
+  assert.equal(sent.openai[0].byteLength, 960);
+  assert.equal(sent.openai[0].readInt16LE(0), sent.deepgram[0].readInt16LE(0));
   assert.equal(clocks.length, 0);
   assert.equal(playing, true);
   playback.onended();
+  assert.equal(sent.openai[2].byteLength, 2880);
   assert.equal(nodes["live-progress"].value, 0.04);
   assert.equal(contextClosed, false);
   clocks.shift().callback();
@@ -329,8 +384,8 @@ test("a noisy recording plays while identical 20 ms packets stream to both provi
   }
 });
 
-test("token endpoint works with one configured provider and reports an upstream failure", async (t) => {
-  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "LIVE_TEST_ENABLED"];
+test("token endpoint works with one configured provider and mints an ephemeral OpenAI token", async (t) => {
+  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "LIVE_TEST_ENABLED"];
   const original = new Map(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) {
     delete process.env[key];
@@ -344,6 +399,16 @@ test("token endpoint works with one configured provider and reports an upstream 
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url.includes("deepgram")) return { ok: false, status: 403 };
     const setup = JSON.parse(options.body);
+    if (url.startsWith("https://api.openai.com/")) {
+      assert.equal(url, "https://api.openai.com/v1/realtime/client_secrets");
+      assert.equal(options.headers.Authorization, "Bearer example-openai-secret");
+      assert.equal(setup.expires_after.seconds, 20);
+      assert.equal(setup.session.type, "transcription");
+      assert.equal(setup.session.audio.input.transcription.model, "gpt-live-transcribe");
+      assert.equal(setup.session.audio.input.turn_detection, null);
+      assert.equal(setup.session.audio.input.format.rate, 24000);
+      return { ok: true, json: async () => ({ value: "ek_test" }) };
+    }
     assert.equal(setup.uses, 1);
     assert.equal(setup.bidiGenerateContentSetup.inputAudioTranscription.languageCodes[0], "si");
     return { ok: true, json: async () => ({ name: "auth_tokens/test-only" }) };
@@ -356,7 +421,7 @@ test("token endpoint works with one configured provider and reports an upstream 
   const disabled = makeResponse();
   await liveSession({ method: "POST" }, disabled);
   assert.equal(disabled.code, 503);
-  assert.match(disabled.body.error, /DEEPGRAM_API_KEY or GOOGLE_API_KEY/);
+  assert.match(disabled.body.error, /OPENAI_API_KEY/);
   process.env.GOOGLE_API_KEY = "example-google-secret";
   const crossSite = makeResponse();
   await liveSession({ method: "POST", headers: { "sec-fetch-site": "cross-site" } }, crossSite);
@@ -366,14 +431,16 @@ test("token endpoint works with one configured provider and reports an upstream 
   await liveSession({ method: "POST" }, onlyGemini);
   assert.equal(onlyGemini.code, 200);
   assert.deepEqual(onlyGemini.body.tokens, { gemini: "auth_tokens/test-only" });
+  assert.match(onlyGemini.body.errors.openai, /Set OPENAI_API_KEY/);
   assert.match(onlyGemini.body.errors.deepgram, /Set DEEPGRAM_API_KEY/);
   assert.equal(fetch.mock.callCount(), 1);
   process.env.DEEPGRAM_API_KEY = "example-deepgram-secret";
+  process.env.OPENAI_API_KEY = "example-openai-secret";
   const granted = makeResponse();
   await liveSession({ method: "POST", headers: { "sec-fetch-site": "same-origin" } }, granted);
   assert.equal(granted.code, 200);
   assert.equal(granted.headers["Cache-Control"], "no-store");
-  assert.deepEqual(granted.body.tokens, { gemini: "auth_tokens/test-only" });
+  assert.deepEqual(granted.body.tokens, { gemini: "auth_tokens/test-only", openai: "ek_test" });
   assert.match(granted.body.errors.deepgram, /403/);
   assert.doesNotMatch(JSON.stringify(granted.body), /example-.*secret/);
 });

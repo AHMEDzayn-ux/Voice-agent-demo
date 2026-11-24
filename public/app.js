@@ -370,6 +370,7 @@ function updateCost() {
   const format = (value) => estimates ? `${usd.format(value)}/mo` : "—";
   el("cost-nova").textContent = format(estimates?.nova);
   el("cost-gemini").textContent = format(estimates && estimates.geminiInput + estimates.geminiOutput);
+  el("cost-openai").textContent = format(estimates?.openai);
   el("cost-cleanup").textContent = format(estimates?.cleanup);
   el("cost-breakdown").textContent = estimates
     ? `Gemini audio subtotal: ${usd.format(estimates.geminiInput)} caller input + ${usd.format(estimates.geminiOutput)} spoken output. Cleanup is an optional add-on to either path.`

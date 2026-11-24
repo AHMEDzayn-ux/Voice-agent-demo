@@ -5,7 +5,11 @@
   const { LiveWire: wire, BenchmarkCore: core } = window;
   if (!wire || !core) return;
   const { elapsed } = core;
-  const providerNames = { deepgram: "Nova-3", gemini: "Gemini 3.8 Live" };
+  const providers = {
+    deepgram: { name: "Deepgram", model: "Nova-3" },
+    gemini: { name: "Google", model: "Gemini 3.8 Live" },
+    openai: { name: "OpenAI", model: "GPT Live Transcribe" },
+  };
   const durationLimit = 120;
   const sampleRate = 16000;
   const recordingSelect = get("live-recording");
@@ -51,11 +55,11 @@
   }
 
   const states = {};
-  for (const [provider, label] of Object.entries(providerNames)) {
+  for (const [provider, { name, model }] of Object.entries(providers)) {
     const panel = make("article", null, `transcript ${provider}`);
     const header = make("header");
     const title = make("div");
-    title.append(make("p", provider === "deepgram" ? "Deepgram" : "Google", "provider"), make("h3", label));
+    title.append(make("p", name, "provider"), make("h3", model));
     const status = make("span", "Ready", "feed-status");
     header.append(title, status);
     const metrics = make("dl", null, "feed-metrics");
@@ -71,7 +75,7 @@
     const transcript = make("div", "Waiting for audio.", "transcript-body");
     transcript.lang = "si";
     transcript.tabIndex = 0;
-    transcript.setAttribute("aria-label", `${label} live transcript`);
+    transcript.setAttribute("aria-label", `${model} live transcript`);
     const timing = make("p", null, "transcript-foot");
     timing.hidden = true;
     panel.append(header, metrics, transcript, timing);
@@ -87,13 +91,13 @@
       field.textContent = key === "interimCount" ? value : value === null ? "—" : `${value.toFixed(2)} s`;
     }
     const clean = (text) => get("live-rules").checked ? core.clean(text) : text;
-    const pending = "Waiting for transcript.";
+    const { raw, interim } = provider === "openai" ? run.openaiTranscript.text() : observed;
     ui.transcript.replaceChildren();
-    if (!observed.raw && !observed.interim) {
-      ui.transcript.append(make("span", pending, "waiting"));
+    if (!raw && !interim) {
+      ui.transcript.append(make("span", "Waiting for transcript.", "waiting"));
     } else {
-      if (observed.raw) ui.transcript.append(make("span", clean(observed.raw)));
-      if (observed.interim) ui.transcript.append(make("span", `${observed.raw ? " " : ""}${clean(observed.interim)}`, "interim"));
+      if (raw) ui.transcript.append(make("span", clean(raw)));
+      if (interim) ui.transcript.append(make("span", `${raw ? " " : ""}${clean(interim)}`, "interim"));
     }
     ui.transcript.scrollTop = ui.transcript.scrollHeight;
     const latest = run.latest[provider];
@@ -169,13 +173,17 @@
         socket.close();
         continue;
       }
-      try { socket.send(wire.audioPacket(provider, bytes)); sent++; }
+      try {
+        const packets = provider === "openai" ? run.openaiInput.append(bytes) : [wire.audioPacket(provider, bytes)];
+        for (const packet of packets) socket.send(packet);
+        sent++;
+      }
       catch {
         run.failed.add(provider);
         states[provider].status.textContent = "Could not send audio";
       }
     }
-    if (!sent && !run.stopping) stop("Both streams disconnected.");
+    if (!sent && !run.stopping) stop("All live streams disconnected.");
   }
 
   function connect(run, provider, token, setup) {
@@ -185,7 +193,7 @@
       run.sockets[provider] = socket;
       socket.binaryType = "arraybuffer";
       const timeout = setTimeout(() => {
-        states[provider].status.textContent = "Connection timed out";
+        if (current === run) states[provider].status.textContent = "Connection timed out";
         if (socket.readyState < WebSocket.CLOSING) socket.close();
         resolve();
       }, 8000);
@@ -206,8 +214,27 @@
         try {
           const message = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data));
           if (provider === "gemini" && "setupComplete" in message) ready();
+          if (provider === "openai") {
+            if (message.type === "session.updated") ready();
+            if (message.type === "error") {
+              const code = message.error?.code;
+              states.openai.status.textContent = code === "credit_balance_exhausted" || code === "insufficient_quota"
+                ? "OpenAI API credits exhausted"
+                : typeof code === "string" && /^[\w-]{1,48}$/.test(code) ? `OpenAI error (${code})` : "OpenAI session error";
+              run.failed.add(provider);
+              socket.close();
+              return;
+            }
+            if (message.type === "conversation.item.input_audio_transcription.failed") {
+              states.openai.status.textContent = "A turn failed";
+              run.failed.add(provider);
+            }
+          }
           if (run.started === null) return;
-          const events = wire.transcripts(provider, message, (performance.now() - run.started) / 1000);
+          const arrival = (performance.now() - run.started) / 1000;
+          const events = provider === "openai"
+            ? run.openaiTranscript.read(message, arrival)
+            : wire.transcripts(provider, message, arrival);
           if (events.length) {
             run.events[provider].push(...events);
             const latest = events.at(-1);
@@ -229,7 +256,7 @@
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
           if (run.started !== null && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
-            stop("Both streams disconnected.");
+            stop("All live streams disconnected.");
           }
         }
         resolve();
@@ -292,8 +319,12 @@
     if (!run.playback?.ended) releaseAudio(run);
     const open = [];
     for (const [provider, socket] of Object.entries(run.sockets)) {
-      if (socket.readyState === WebSocket.OPEN) {
-        try { socket.send(wire.endPacket(provider)); open.push(socket); }
+      if (run.ready.has(provider) && socket.readyState === WebSocket.OPEN) {
+        try {
+          const packets = provider === "openai" ? run.openaiInput.finish() : [wire.endPacket(provider)];
+          for (const packet of packets) socket.send(packet);
+          open.push(socket);
+        }
         catch { /* Connection already closed. */ }
       }
     }
@@ -314,7 +345,8 @@
     }
     const run = {
       started: null, stopping: false, sockets: {}, ready: new Set(), failed: new Set(),
-      events: { deepgram: [], gemini: [] }, latest: {}, controller: new AbortController(),
+      events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
+      openaiInput: wire.openaiInput(), openaiTranscript: wire.openaiTranscript(), latest: {}, controller: new AbortController(),
     };
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
@@ -363,15 +395,16 @@
       for (const [provider, error] of Object.entries(payload.errors || {})) {
         if (states[provider]) states[provider].status.textContent = error;
       }
+      const setup = { gemini: payload.geminiSetup, openai: payload.openaiSetup };
       await Promise.all(Object.entries(payload.tokens || {}).map(([provider, token]) =>
-        connect(run, provider, token, payload.geminiSetup)
+        connect(run, provider, token, setup[provider])
       ));
       if (current !== run) return;
       if (!Object.values(run.sockets).some((socket) => socket.readyState === WebSocket.OPEN) || !run.ready.size) {
-        throw new Error("Neither live provider connected. See the provider status below.");
+        throw new Error("No live provider connected. See the provider status below.");
       }
       const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
-      const destination = activeProviders.map((provider) => providerNames[provider]).join(" and ");
+      const destination = new Intl.ListFormat("en").format(activeProviders.map((provider) => providers[provider].model));
       get("live-status").textContent = mode === "mic"
         ? `Streaming your microphone to ${destination}…`
         : `Playing and streaming the recording at 1× to ${destination}…`;

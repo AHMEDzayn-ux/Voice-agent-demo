@@ -74,16 +74,19 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 #live-clock { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .live-view-tools { display: flex; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; color: var(--muted); font-size: .875rem; margin-bottom: 7px; }
 .transcripts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+#live-feeds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .transcript { min-width: 0; display: grid; grid-template-rows: auto auto 1fr auto; border: 1px solid var(--line); border-radius: 12px; background: #fbfcf5; padding: 12px 16px; }
 .transcript header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .provider { color: var(--green); margin: 0 0 3px; text-transform: uppercase; letter-spacing: .095em; font-size: .875rem; font-weight: 740; }
 .gemini .provider { color: var(--violet); }
+.openai .provider, .openai .feed-status { color: #21617c; }
 .transcript h3 { font-size: clamp(1.05rem, 2.1vw, 1.35rem); letter-spacing: -.04em; margin: 0; }
 .feed-status { color: var(--green); font-weight: 700; font-size: .9rem; }
 .gemini .feed-status { color: var(--violet); }
 .feed-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 10px 0 0; }
 .feed-metrics div { background: #edf2e7; border-radius: 7px; padding: 6px 7px; }
 .gemini .feed-metrics div { background: #f0edf8; }
+.openai .feed-metrics div { background: #e7f0f4; }
 .feed-metrics dt { color: var(--muted); font-size: .875rem; }
 .feed-metrics dd { margin: 4px 0 0; font: 700 1rem ui-monospace, monospace; }
 .transcript-body { margin: 9px 0 6px; border-block: 1px solid var(--line); min-height: 5rem; max-height: clamp(7rem, 27dvh, 15rem); overflow: auto; line-height: 1.6; padding-block: 7px; overflow-wrap: anywhere; }
@@ -126,7 +129,7 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 .cost-inputs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .cost-inputs label { display: grid; gap: 5px; color: var(--muted); font-size: .875rem; font-weight: 640; }
 .cost-inputs input { width: 100%; }
-.cost-results { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 7px 0 0; padding: 0; }
+.cost-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 7px 0 0; padding: 0; }
 .cost-results li { display: grid; gap: 4px; background: #eaf0e4; border-radius: 8px; padding: 8px; font-size: .875rem; }
 .cost-results strong { font-variant-numeric: tabular-nums; font-size: 1rem; }
 .cost-panel a { color: var(--green); }
@@ -154,6 +157,9 @@ tr :first-child { text-align: left; }
 .method dl div { border-top: 1px solid var(--line); padding-top: 7px; }
 .method dt { font-weight: 760; }
 .method dd { margin: 4px 0 0; color: var(--muted); line-height: 1.55; }
+@media (max-width: 960px) {
+  #live-feeds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 690px) {
   .wrap { width: calc(100% - 24px); }
   .masthead-inner { align-items: stretch; flex-direction: column; gap: 7px; padding-block: 8px; }
@@ -178,12 +184,13 @@ tr :first-child { text-align: left; }
   .cleanup-toolbar { flex-direction: column; align-items: stretch; gap: 5px; }
   .options { margin-top: 0; }
   .options-grid, .decision-grid, .method dl { grid-template-columns: 1fr; }
-  .cost-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cost-inputs, .cost-results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .swipe-note { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 6px; }
   .cleanup-grid { grid-template-columns: none; grid-auto-columns: min(79%, 290px); grid-auto-flow: column; overflow-x: auto; scroll-snap-type: x proximity; padding: 2px 2px 4px; }
   .stage { scroll-snap-align: start; }
 }
 @media (max-width: 410px) {
+  #live-feeds { grid-template-columns: minmax(0, 1fr); }
   .view-tabs button { font-size: .875rem; padding-inline: 3px; }
   .feed-metrics dd { font-size: .94rem; }
   .metric { padding-inline: 8px; }
