@@ -9,6 +9,7 @@ const core = require("../public/demo-core.js");
 const wire = require("../public/live-wire.js");
 const liveSession = require("../api/live-session.js");
 const liveCleanup = require("../api/live-cleanup.js");
+const groqTranscribe = require("../api/groq-transcribe.js");
 
 const site = path.join(__dirname, "..", "public");
 const load = (file) => fs.readFileSync(path.join(site, file), "utf8");
@@ -46,7 +47,7 @@ function initDashboard(initialHash = "", runtime = {}) {
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, performance: { now: () => 123 },
     location: { hash: initialHash },
     history: { replaceState(_state, _title, hash) { browser.location.hash = hash; } },
-    Blob, atob,
+    Blob, atob, AbortSignal,
     URL: { createObjectURL: () => "blob:test-call", revokeObjectURL() {} },
     listeners: {},
     devicePixelRatio: 2, addEventListener(name, callback) { this.listeners[name] = callback; },
@@ -138,7 +139,7 @@ test("live view offers bundled recordings and can select a local file without st
   nodes["tab-live"].callbacks.click();
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
-  assert.equal(nodes["live-feeds"].children.length, 3);
+  assert.equal(nodes["live-feeds"].children.filter((panel) => !panel.hidden).length, 3);
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
   const recordings = nodes["live-recording"];
@@ -226,8 +227,9 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("a recording plays through three STT providers and reports optional cleanup timings", async () => {
+test("recording streams to four providers and shares identical cleanup while it plays", async () => {
   const sent = { deepgram: [], gemini: [], openai: [] };
+  const final = "\u0dc3\u0dd2 fiber package 2048";
   const clocks = [];
   let tick;
   let audioTime = 1;
@@ -270,7 +272,7 @@ test("a recording plays through three STT providers and reports optional cleanup
       }
       if (message?.type === "input_audio_buffer.commit") {
         this.emit({ type: "input_audio_buffer.committed", item_id: "turn-1" });
-        this.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "turn-1", transcript: "\u0dc3\u0dd2" });
+        this.emit({ type: "conversation.item.input_audio_transcription.completed", item_id: "turn-1", transcript: final });
         return;
       }
       if (message?.type === "input_audio_buffer.append") {
@@ -283,14 +285,10 @@ test("a recording plays through three STT providers and reports optional cleanup
         return;
       }
       if (message?.type === "CloseStream" || message?.realtimeInput?.audioStreamEnd) {
-        const text = "\u0dc3\u0dd2";
-        this.emit(this.provider === "deepgram"
-          ? { type: "Results", is_final: true, channel: { alternatives: [{ transcript: text }] } }
-          : { serverContent: { inputTranscription: { text } } });
         if (message?.type === "CloseStream") {
           this.readyState = Socket.CLOSING;
           this.dispatchEvent(new Event("close"));
-        }
+        } else this.emit({ serverContent: { inputTranscription: { text: final } } });
         return;
       }
       assert.ok(playing);
@@ -301,6 +299,9 @@ test("a recording plays through three STT providers and reports optional cleanup
         this.emit(this.provider === "deepgram"
           ? { type: "Results", is_final: false, channel: { alternatives: [{ transcript: text }] } }
           : { serverContent: { interimInputTranscription: { text } } });
+      }
+      if (this.provider === "deepgram" && sent.deepgram.length === 2) {
+        this.emit({ type: "Results", is_final: true, speech_final: true, channel: { alternatives: [{ transcript: final }] } });
       }
     }
     close() { this.readyState = Socket.CLOSING; }
@@ -332,16 +333,21 @@ test("a recording plays through three STT providers and reports optional cleanup
       requested.push(url);
       if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
       if (url === "/api/live-cleanup") {
-        assert.deepEqual(JSON.parse(options.body), { text: "\u0dc3\u0dd2" });
-        return { ok: true, json: async () => { wallTime += 680; return { text: "\u0dc3\u0dd2.", apiMs: 620 }; } };
+        assert.deepEqual(JSON.parse(options.body), { text: final });
+        return { ok: true, json: async () => { wallTime += 680; return { text: `${final}.`, model: "qwen/qwen3.8-27b", apiMs: 620 }; } };
+      }
+      if (url === "/api/groq-transcribe") {
+        assert.deepEqual(Buffer.from(JSON.parse(options.body).audio, "base64"), Buffer.concat(sent.deepgram));
+        return { ok: true, json: async () => ({ text: final, apiMs: 660 }) };
       }
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
-      assert.equal(options.body, undefined);
+      assert.deepEqual(JSON.parse(options.body), { groq: true });
       return { ok: true, json: async () => ({
         tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test", openai: "ek_test" },
         geminiSetup: { model: "models/gemini-3.8-live" },
         openaiSetup: { type: "transcription" },
+        groqEnabled: true,
       }) };
     },
     setInterval(callback) { tick = callback; return 0; },
@@ -355,6 +361,7 @@ test("a recording plays through three STT providers and reports optional cleanup
   });
   assert.deepEqual(requested, []);
   nodes["live-llm"].checked = true;
+  nodes["live-groq"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
@@ -363,7 +370,7 @@ test("a recording plays through three STT providers and reports optional cleanup
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
   assert.equal(nodes["live-progress"].hidden, false);
   assert.equal(nodes["live-progress"].max, 0.04);
-  for (const panel of nodes["live-feeds"].children) {
+  for (const panel of nodes["live-feeds"].children.slice(0, 3)) {
     assert.equal(panel.children[2].children[0].textContent, "\u0dc3");
     assert.equal(panel.children[3].textContent, "Interim received at recording 0:00.0");
   }
@@ -381,6 +388,8 @@ test("a recording plays through three STT providers and reports optional cleanup
   assert.equal(sent.openai[0].readInt16LE(0), sent.deepgram[0].readInt16LE(0));
   assert.equal(clocks.length, 0);
   assert.equal(playing, true);
+  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  assert.equal(requested.includes("/api/groq-transcribe"), false);
   playback.onended();
   assert.equal(sent.openai[2].byteLength, 2880);
   assert.equal(nodes["live-progress"].value, 0.04);
@@ -391,33 +400,45 @@ test("a recording plays through three STT providers and reports optional cleanup
   clocks.shift().callback();
   await new Promise(setImmediate);
   assert.equal(contextClosed, true);
-  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 3);
+  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  assert.equal(requested.filter((url) => url === "/api/groq-transcribe").length, 1);
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {
     assert.equal(panel.children[0].children[1].textContent, "Complete");
-    assert.equal(panel.children[2].children[0].textContent, "\u0dc3\u0dd2");
-    assert.match(panel.children[3].textContent, /Final received .* after playback/);
+    assert.equal(panel.children[2].children[0].textContent, final);
+    assert.match(panel.children[3].textContent, /Final received at /);
     const rows = panel.children[4].children[1].children;
     assert.equal(rows[1].children[1].textContent, "0.0 ms");
     assert.match(rows[2].children[2].textContent, /(?:ms|s)$/);
-    assert.match(rows[3].children[2].textContent, / s$/);
-    assert.match(panel.children[5].textContent, /Gemini API 620 ms.*after audio end/);
+    assert.match(rows[3].children[2].textContent, /(?:ms|s)$/);
+    assert.match(panel.children[5].textContent, /qwen\/qwen3\.8-27b API 620 ms|Shared cleanup request/);
   }
   nodes["live-stage"].value = "llm";
   nodes["live-stage"].callbacks.change();
-  for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[2].children[0].textContent, "\u0dc3\u0dd2.");
+  for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[2].children[0].textContent, `${final}.`);
 });
 
 test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digits", async (t) => {
   const key = process.env.GOOGLE_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
+  delete process.env.GROQ_API_KEY;
   process.env.GOOGLE_API_KEY = "example-cleanup-key";
   t.after(() => {
     if (key === undefined) delete process.env.GOOGLE_API_KEY;
     else process.env.GOOGLE_API_KEY = key;
+    if (groqKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = groqKey;
   });
   const text = "\u0dc3\u0dd2 2048";
   let output = `${text}.`;
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url.startsWith("https://api.groq.com/")) {
+      assert.equal(options.headers.Authorization, "Bearer example-groq-key");
+      const { model, reasoning_effort } = JSON.parse(options.body);
+      assert.equal(model, "qwen/qwen3.8-27b");
+      assert.equal(reasoning_effort, "none");
+      return { ok: true, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: output } }] }) };
+    }
     assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
     assert.equal(options.headers["x-goog-api-key"], "example-cleanup-key");
     const request = JSON.parse(options.body);
@@ -446,10 +467,44 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
   await liveCleanup({ method: "POST", body: { text } }, rejected);
   assert.equal(rejected.code, 422);
   assert.equal(rejected.body.text, undefined);
+
+  process.env.GROQ_API_KEY = "example-groq-key";
+  output = `${text}.`;
+  const fast = response();
+  await liveCleanup({ method: "POST", body: { text } }, fast);
+  assert.equal(fast.code, 200);
+  assert.equal(fast.body.model, "qwen/qwen3.8-27b");
+});
+
+test("Groq STT validates the chunk and wraps its PCM without changing samples", async (t) => {
+  const key = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = "example-groq-key";
+  t.after(() => {
+    if (key === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = key;
+  });
+  const pcm = Buffer.alloc(640, 7);
+  const upstream = t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "https://api.groq.com/openai/v1/audio/transcriptions");
+    assert.equal(options.body.get("language"), "si");
+    const wav = Buffer.from(await options.body.get("file").arrayBuffer());
+    assert.equal(wav.readUInt32LE(24), 16000);
+    assert.deepEqual(wav.subarray(44), pcm);
+    return { ok: true, json: async () => ({ text: "\u0dc3\u0dd2" }) };
+  });
+  const response = () => ({ setHeader() {}, status(code) { this.code = code; return this; }, json(body) { this.body = body; } });
+  const invalid = response();
+  await groqTranscribe({ method: "POST", body: { audio: "!" } }, invalid);
+  assert.equal(invalid.code, 400);
+  assert.equal(upstream.mock.callCount(), 0);
+  const valid = response();
+  await groqTranscribe({ method: "POST", body: { audio: pcm.toString("base64") } }, valid);
+  assert.equal(valid.code, 200);
+  assert.equal(valid.body.text, "\u0dc3\u0dd2");
 });
 
 test("token endpoint works with one configured provider and mints an ephemeral OpenAI token", async (t) => {
-  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "LIVE_TEST_ENABLED"];
+  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "LIVE_TEST_ENABLED"];
   const original = new Map(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) {
     delete process.env[key];
@@ -485,7 +540,12 @@ test("token endpoint works with one configured provider and mints an ephemeral O
   const disabled = makeResponse();
   await liveSession({ method: "POST" }, disabled);
   assert.equal(disabled.code, 503);
-  assert.match(disabled.body.error, /OPENAI_API_KEY/);
+  assert.match(disabled.body.error, /API key in Vercel/);
+  process.env.GROQ_API_KEY = "example-groq-key";
+  const onlyGroq = makeResponse();
+  await liveSession({ method: "POST", body: { groq: true } }, onlyGroq);
+  assert.equal(onlyGroq.code, 200);
+  assert.equal(onlyGroq.body.groqEnabled, true);
   process.env.GOOGLE_API_KEY = "example-google-secret";
   const crossSite = makeResponse();
   await liveSession({ method: "POST", headers: { "sec-fetch-site": "cross-site" } }, crossSite);

@@ -26,7 +26,14 @@
     return { url, protocols: [], setup: JSON.stringify({ setup }) };
   }
 
-  const encode = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  function encode(bytes) {
+    const data = new Uint8Array(bytes);
+    let raw = "";
+    for (let offset = 0; offset < data.length; offset += 16384) {
+      raw += String.fromCharCode(...data.subarray(offset, offset + 16384));
+    }
+    return btoa(raw);
+  }
 
   function audioPacket(provider, bytes) {
     if (provider === "deepgram") return bytes;
@@ -113,6 +120,7 @@
   function openaiTranscript() {
     const items = new Map();
     const committed = new Set();
+    const ordered = () => [...new Set([...committed, ...items.keys()])];
     return {
       read(message, elapsed) {
         const id = message.item_id;
@@ -139,18 +147,20 @@
         return [];
       },
       text() {
-        // Completion events may arrive out of order across turns.
-        const order = new Set([...committed, ...items.keys()]);
         const raw = [];
         const interim = [];
-        for (const id of order) {
+        for (const id of ordered()) {
           const item = items.get(id);
           if (item?.text.trim()) (item.final ? raw : interim).push(item.text.trim());
         }
         return { raw: raw.join(" "), interim: interim.join(" ") };
       },
+      finalIds() {
+        // Completion events may arrive out of order across turns.
+        return ordered().filter((id) => items.get(id)?.final);
+      },
     };
   }
 
-  return { connection, audioPacket, endPacket, transcripts, openaiInput, openaiTranscript };
+  return { connection, audioPacket, endPacket, transcripts, openaiInput, openaiTranscript, encode };
 });

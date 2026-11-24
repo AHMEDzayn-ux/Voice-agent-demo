@@ -77,7 +77,8 @@
           <option value="rules">Deterministic cleanup</option>
           <option value="llm">LLM cleanup</option>
         </select></label>
-        <label><input id="live-llm" type="checkbox"> Run Flash-Lite cleanup after streaming</label>
+        <label><input id="live-llm" type="checkbox"> Run LLM cleanup as STT finalizes</label>
+        <label><input id="live-groq" type="checkbox"> Include Groq Whisper (4 s chunks)</label>
         <span>Totals start at the first audio packet.</span>
       </div>
       <div id="live-feeds" class="transcripts"></div>

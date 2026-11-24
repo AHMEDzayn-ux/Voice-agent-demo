@@ -82,12 +82,14 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 .live-cleanup-note { margin-top: 5px; }
 .transcripts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 #live-feeds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#live-feeds:has(.groq:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #live-feeds .transcript { grid-template-rows: auto auto 1fr auto auto auto; }
 .transcript { min-width: 0; display: grid; grid-template-rows: auto auto 1fr auto; border: 1px solid var(--line); border-radius: 12px; background: #fbfcf5; padding: 12px 16px; }
 .transcript header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .provider { color: var(--green); margin: 0 0 3px; text-transform: uppercase; letter-spacing: .095em; font-size: .875rem; font-weight: 740; }
 .gemini .provider { color: var(--violet); }
 .openai .provider, .openai .feed-status { color: #21617c; }
+.groq .provider, .groq .feed-status { color: #8a4926; }
 .transcript h3 { font-size: clamp(1.05rem, 2.1vw, 1.35rem); letter-spacing: -.04em; margin: 0; }
 .feed-status { color: var(--green); font-weight: 700; font-size: .9rem; }
 .gemini .feed-status { color: var(--violet); }
@@ -95,6 +97,7 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 .feed-metrics div { background: #edf2e7; border-radius: 7px; padding: 6px 7px; }
 .gemini .feed-metrics div { background: #f0edf8; }
 .openai .feed-metrics div { background: #e7f0f4; }
+.groq .feed-metrics div { background: #f7ede0; }
 .feed-metrics dt { color: var(--muted); font-size: .875rem; }
 .feed-metrics dd { margin: 4px 0 0; font: 700 1rem ui-monospace, monospace; }
 .transcript-body { margin: 9px 0 6px; border-block: 1px solid var(--line); min-height: 5rem; max-height: clamp(7rem, 27dvh, 15rem); overflow: auto; line-height: 1.6; padding-block: 7px; overflow-wrap: anywhere; }
@@ -198,7 +201,7 @@ tr :first-child { text-align: left; }
   .stage { scroll-snap-align: start; }
 }
 @media (max-width: 410px) {
-  #live-feeds { grid-template-columns: minmax(0, 1fr); }
+  #live-feeds, #live-feeds:has(.groq:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
   .live-view-tools > span { margin-left: 0; }
   .view-tabs button { font-size: .875rem; padding-inline: 3px; }
   .feed-metrics dd { font-size: .94rem; }

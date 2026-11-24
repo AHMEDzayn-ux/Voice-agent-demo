@@ -9,9 +9,11 @@
     deepgram: { name: "Deepgram", model: "Nova-3" },
     gemini: { name: "Google", model: "Gemini 3.8 Live" },
     openai: { name: "OpenAI", model: "GPT Live Transcribe" },
+    groq: { name: "Groq", model: "Whisper Large v3" },
   };
   const durationLimit = 120;
   const sampleRate = 16000;
+  const groqChunkBytes = 4 * sampleRate * 2;
   const recordingSelect = get("live-recording");
   const localFileId = "local-file";
   const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenarioLabel, label, audio }) => {
@@ -57,6 +59,7 @@
   const states = {};
   for (const [provider, { name, model }] of Object.entries(providers)) {
     const panel = make("article", null, `transcript ${provider}`);
+    panel.hidden = provider === "groq";
     const header = make("header");
     const title = make("div");
     title.append(make("p", name, "provider"), make("h3", model));
@@ -90,7 +93,7 @@
     pipelineHead.append(headings);
     const pipelineBody = make("tbody");
     const stages = {};
-    for (const [key, label] of [["stt", "STT final"], ["rules", "Deterministic"], ["wait", "Finalization wait"], ["llm", "Flash-Lite"]]) {
+    for (const [key, label] of [["stt", "STT final"], ["rules", "Deterministic"], ["wait", "Queue wait"], ["llm", "LLM cleanup"]]) {
       const row = make("tr");
       const title = make("th", label);
       title.scope = "row";
@@ -106,7 +109,7 @@
     cleanupNote.hidden = true;
     panel.append(header, metrics, transcript, timing, pipeline, cleanupNote);
     get("live-feeds").append(panel);
-    states[provider] = { status, fields, transcript, timing, stages, cleanupNote };
+    states[provider] = { panel, status, fields, transcript, timing, stages, cleanupNote };
   }
 
   function formatDuration(ms) {
@@ -114,8 +117,8 @@
     return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${ms.toFixed(ms < 10 ? 1 : 0)} ms`;
   }
 
-  function renderPipeline(run, ui, pipeline) {
-    const llm = pipeline?.llm;
+  function renderPipeline(run, provider, ui, pipeline, fallbackVisible) {
+    const llm = pipeline?.batch?.llm;
     const stageTimes = {
       stt: [pipeline?.sttMs, pipeline?.sttMs],
       rules: [pipeline?.rulesMs, pipeline?.rulesTotal],
@@ -130,11 +133,16 @@
     ui.stages.wait.row.hidden = !llm;
     const notes = [];
     if (llm?.error) notes.push(llm.error);
-    if (llm && llm.requestMs === undefined && get("live-stage").value !== "llm") notes.push("Flash-Lite is cleaning the final transcript…");
-    if (Number.isFinite(llm?.apiMs)) notes.push(`Gemini API ${formatDuration(llm.apiMs)}`);
-    if (llm?.text && run.audioEndedAt !== undefined) {
-      notes.push(`${formatDuration(Math.max(0, run.started + llm.totalMs - run.audioEndedAt))} after audio end`);
+    if (pipeline?.skipped) notes.push("Kept deterministic text for this fragment.");
+    else if (llm && llm.requestMs === undefined) notes.push("Cleaning finalized text…");
+    if (llm?.shared) notes.push("Shared cleanup request");
+    if (llm?.model && !llm.shared && Number.isFinite(llm.apiMs)) notes.push(`${llm.model} API ${formatDuration(llm.apiMs)}`);
+    if (llm?.text) notes.push(`${formatDuration(Math.max(0, llm.totalMs - pipeline.sttMs))} after STT final`);
+    if (llm?.text && run.audioEndedAt !== undefined && run.started + llm.totalMs >= run.audioEndedAt) {
+      notes.push(`${formatDuration(run.started + llm.totalMs - run.audioEndedAt)} after audio end`);
     }
+    if (fallbackVisible) notes.push("Dimmed text uses deterministic cleanup.");
+    if (provider === "groq" && Number.isFinite(run.groq?.apiMs)) notes.push(`Groq STT API ${formatDuration(run.groq.apiMs)}`);
     ui.cleanupNote.textContent = notes.join(" · ");
     ui.cleanupNote.hidden = !notes.length;
   }
@@ -147,27 +155,32 @@
       field.textContent = key === "interimCount" ? value : value === null ? "—" : `${value.toFixed(2)} s`;
     }
     const { raw, interim } = provider === "openai" ? run.openaiTranscript.text() : observed;
-    let pipeline = run.pipeline[provider];
-    if (raw && raw !== pipeline?.raw) {
-      const start = performance.now();
-      const rules = core.clean(raw);
-      const end = performance.now();
-      pipeline = run.pipeline[provider] = { raw, rules, sttMs: observed.lastFinal * 1000, rulesMs: end - start, rulesTotal: end - run.started };
-    }
+    const pipeline = run.pipeline[provider];
     const stage = get("live-stage").value;
-    const text = stage === "llm" ? pipeline?.llm?.text : stage === "rules" ? pipeline?.rules : raw;
-    const pending = stage === "rules" ? core.clean(interim) : interim;
-    const showInterim = pending && stage !== "llm";
+    const parts = provider === "openai"
+      ? run.openaiTranscript.finalIds().map((id) => pipeline.parts.get(id)).filter(Boolean)
+      : [...pipeline.parts.values()];
     ui.transcript.replaceChildren();
-    if (!text && !showInterim) {
-      const waiting = stage !== "llm" ? "Waiting for transcript."
-        : !run.llmEnabled ? "Enable Flash-Lite before starting a test."
-          : pipeline?.llm?.error ? "Cleanup unavailable. Raw and deterministic transcripts are still available."
-            : pipeline?.llm ? "Waiting for Flash-Lite…" : "Flash-Lite starts after streaming.";
-      ui.transcript.append(make("span", waiting, "waiting"));
+    let fallbackVisible = false;
+    if (stage === "llm" && run.llmEnabled && parts.length) {
+      let hasText = false;
+      for (const part of parts) {
+        const corrected = part.batch?.llm.text;
+        if (corrected && part.batch.parts[0] !== part) continue;
+        const text = corrected || part.rules;
+        if (!text) continue;
+        fallbackVisible ||= !corrected;
+        ui.transcript.append(make("span", `${hasText ? " " : ""}${text}`, corrected ? null : "waiting"));
+        hasText = true;
+      }
+    } else if (stage === "llm") {
+      ui.transcript.append(make("span", run.llmEnabled ? "Waiting for finalized text." : "Enable LLM cleanup before starting a test.", "waiting"));
     } else {
+      const text = stage === "rules" ? parts.map((part) => part.rules).join(" ") : raw;
+      const pending = stage === "rules" ? core.clean(interim) : interim;
       if (text) ui.transcript.append(make("span", text));
-      if (showInterim) ui.transcript.append(make("span", `${text ? " " : ""}${pending}`, "interim"));
+      if (pending) ui.transcript.append(make("span", `${text ? " " : ""}${pending}`, "interim"));
+      if (!text && !pending) ui.transcript.append(make("span", "Waiting for transcript.", "waiting"));
     }
     ui.transcript.scrollTop = ui.transcript.scrollHeight;
     const latest = run.latest[provider];
@@ -178,34 +191,80 @@
         ? `${kind} received at ${elapsed(latest.arrival)}${latest.afterPlayback ? " · after playback" : ""}`
         : `${kind} received at recording ${elapsed(latest.position)}`;
     }
-    renderPipeline(run, ui, pipeline);
+    renderPipeline(run, provider, ui, pipeline.latest, fallbackVisible);
+  }
+
+  function queueCleanup(run, provider, events, message = {}) {
+    const pipeline = run.pipeline[provider];
+    for (const event of events) {
+      const [arrival, raw, final] = event;
+      if (!final || !raw.trim()) continue;
+      const start = performance.now();
+      const rules = core.clean(raw);
+      const end = performance.now();
+      const part = { rules, sttMs: arrival * 1000, rulesMs: end - start, rulesTotal: end - run.started };
+      pipeline.parts.set(provider === "openai" ? message.item_id : event, part);
+      pipeline.latest = part;
+      if (run.llmEnabled) pipeline.pending.push(part);
+    }
+    if (!pipeline.pending.length || pipeline.active) return;
+    if (run.stopping || message.speech_final || provider === "openai" || provider === "groq") {
+      void requestCleanup(run, provider);
+    } else if (pipeline.timer === undefined) {
+      pipeline.timer = setTimeout(() => void requestCleanup(run, provider), 180);
+    }
+  }
+
+  async function fetchCleanup(run, text) {
+    const response = await fetch("/api/live-cleanup", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      signal: AbortSignal.any([run.cleanupController.signal, AbortSignal.timeout(3000)]),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || typeof result.text !== "string" || !result.text.trim()) {
+      return { ...result, text: undefined, error: result.error || "Cleanup unavailable. Kept the deterministic text." };
+    }
+    return result;
   }
 
   async function requestCleanup(run, provider) {
     const pipeline = run.pipeline[provider];
-    if (!run.llmEnabled || !pipeline?.rules || pipeline.llm || lastRun !== run) return;
+    clearTimeout(pipeline.timer);
+    pipeline.timer = undefined;
+    if (!pipeline.pending.length || pipeline.active || lastRun !== run || run.cleanupController.signal.aborted) return;
+    const parts = pipeline.pending.splice(0);
+    if (provider === "openai" && parts.length > 1) {
+      for (const older of parts.splice(0, parts.length - 1)) older.skipped = true;
+    }
+    const latest = parts.at(-1);
+    const text = parts.map((part) => part.rules).join(" ");
+    if (text.split(/\s+/u).length <= 2) {
+      for (const part of parts) part.skipped = true;
+      render(run, provider);
+      return;
+    }
     const start = performance.now();
     const requestAt = start - run.started;
-    const llm = pipeline.llm = { requestAt, waitMs: Math.max(0, requestAt - pipeline.rulesTotal) };
+    const previous = run.cleanupRequests.get(text);
+    const llm = { requestAt, waitMs: Math.max(0, requestAt - latest.rulesTotal), shared: Boolean(previous) };
+    const batch = { llm, parts };
+    for (const part of parts) part.batch = batch;
+    pipeline.active = true;
     render(run, provider);
+    const requested = previous || fetchCleanup(run, text);
+    run.cleanupRequests.set(text, requested);
     try {
-      const response = await fetch("/api/live-cleanup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: pipeline.rules }), signal: run.cleanupController.signal,
-      });
-      const result = await response.json().catch(() => ({}));
-      llm.apiMs = result.apiMs;
-      if (!response.ok || typeof result.text !== "string" || !result.text.trim()) {
-        throw new Error(result.error || "Flash-Lite cleanup was unavailable.");
-      }
-      llm.text = result.text;
+      Object.assign(llm, await requested);
     } catch (error) {
-      llm.error = error.message;
+      llm.error = error.name === "TimeoutError" ? "Cleanup timed out. Kept the deterministic text."
+        : "Cleanup unavailable. Kept the deterministic text.";
     }
     const end = performance.now();
     llm.requestMs = end - start;
     llm.totalMs = end - run.started;
+    pipeline.active = false;
     if (lastRun === run && !run.cleanupController.signal.aborted) render(run, provider);
+    if (pipeline.pending.length) void requestCleanup(run, provider);
   }
 
   function playbackPosition(run) {
@@ -224,7 +283,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file", "live-llm"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-llm", "live-groq"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -253,6 +312,9 @@
           ? "No text" : "Complete";
       }
     }
+    if (run.groq?.enabled && !run.failed.has("groq")) {
+      states.groq.status.textContent = run.events.groq.length ? "Complete" : "No text";
+    }
     for (const { status } of Object.values(states)) {
       if (status.textContent === "Connecting") status.textContent = "Unavailable";
     }
@@ -260,10 +322,73 @@
     setBusy(false);
   }
 
+  function receiveTranscripts(run, provider, events, message) {
+    if (!events.length) {
+      if (message?.speech_final) void requestCleanup(run, provider);
+      return;
+    }
+    run.events[provider].push(...events);
+    const latest = events.at(-1);
+    if (latest[1].trim()) {
+      const playback = run.playback;
+      const afterPlayback = Boolean(playback && (playback.ended || playback.stoppedAt !== null));
+      run.latest[provider] = {
+        arrival: latest[0], final: latest[2], afterPlayback,
+        position: playback && !afterPlayback ? playbackPosition(run) : null,
+      };
+    }
+    queueCleanup(run, provider, events, message);
+    render(run, provider);
+  }
+
+  function submitGroqChunk(run) {
+    const groq = run.groq;
+    if (!groq.length) return;
+    const pcm = groq.buffer.slice(0, groq.length);
+    groq.length = 0;
+    groq.tail = groq.tail.then(async () => {
+      if (current !== run) return;
+      try {
+        const response = await fetch("/api/groq-transcribe", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ audio: wire.encode(pcm) }),
+          signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(4000)]),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (current !== run) return;
+        if (!response.ok || typeof result.text !== "string") throw new Error(result.error || "Groq transcription unavailable.");
+        groq.apiMs = result.apiMs;
+        if (result.text.trim()) receiveTranscripts(run, "groq", [[(performance.now() - run.started) / 1000, result.text, true]]);
+      } catch (error) {
+        if (current === run) {
+          run.failed.add("groq");
+          states.groq.status.textContent = error.name === "TimeoutError" ? "A Groq chunk timed out" : error.message;
+        }
+      }
+    });
+  }
+
+  function bufferGroqFrame(run, bytes) {
+    const groq = run.groq;
+    const packet = new Uint8Array(bytes);
+    let offset = 0;
+    while (offset < packet.length) {
+      const length = Math.min(packet.length - offset, groqChunkBytes - groq.length);
+      groq.buffer.set(packet.subarray(offset, offset + length), groq.length);
+      groq.length += length;
+      offset += length;
+      if (groq.length === groqChunkBytes) submitGroqChunk(run);
+    }
+  }
+
   function sendFrame(run, bytes) {
     if (run !== current || !bytes.byteLength) return;
     if (run.started === null) run.started = performance.now();
     let sent = 0;
+    if (run.groq?.enabled) {
+      bufferGroqFrame(run, bytes);
+      sent++;
+    }
     for (const [provider, socket] of Object.entries(run.sockets)) {
       if (!run.ready.has(provider) || socket.readyState !== WebSocket.OPEN) continue;
       if (socket.bufferedAmount > 65536) {
@@ -334,19 +459,7 @@
           const events = provider === "openai"
             ? run.openaiTranscript.read(message, arrival)
             : wire.transcripts(provider, message, arrival);
-          if (events.length) {
-            run.events[provider].push(...events);
-            const latest = events.at(-1);
-            if (latest[1].trim()) {
-              const playback = run.playback;
-              const afterPlayback = Boolean(playback && (playback.ended || playback.stoppedAt !== null));
-              run.latest[provider] = {
-                arrival: latest[0], final: latest[2], afterPlayback,
-                position: playback && !afterPlayback ? playbackPosition(run) : null,
-              };
-            }
-            render(run, provider);
-          }
+          receiveTranscripts(run, provider, events, message);
         } catch { /* Ignore unsupported provider messages. */ }
       });
       socket.addEventListener("close", ({ code }) => {
@@ -355,7 +468,7 @@
         if (current === run && !run.stopping && !run.failed.has(provider)) {
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
-          if (run.started !== null && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
+          if (run.started !== null && !run.groq?.enabled && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
             stop("All live streams disconnected.");
           }
         }
@@ -418,6 +531,7 @@
     }
     if (!run.playback?.ended) releaseAudio(run);
     run.audioEndedAt = performance.now();
+    if (run.groq?.enabled) submitGroqChunk(run);
     const drains = [];
     const seal = (provider) => {
       if (current !== run) return;
@@ -444,6 +558,10 @@
       await Promise.all(drains);
       clearTimeout(deadline);
     }
+    if (run.groq?.enabled) {
+      await run.groq.tail;
+      seal("groq");
+    }
     finish(run, message);
   }
 
@@ -458,16 +576,20 @@
     if (mode === "mic" && !navigator.mediaDevices?.getUserMedia) {
       return get("live-status").textContent = "Microphone access requires HTTPS or localhost.";
     }
-    lastRun?.cleanupController.abort();
+    cancelCleanup(lastRun);
     const run = {
       started: null, stopping: false, sockets: {}, ready: new Set(), failed: new Set(),
       events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
       openaiInput: wire.openaiInput(), openaiTranscript: wire.openaiTranscript(), latest: {}, controller: new AbortController(),
-      llmEnabled: get("live-llm").checked, pipeline: {}, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
+      llmEnabled: get("live-llm").checked, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
+      pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
+      cleanupRequests: new Map(),
+      groq: get("live-groq").checked ? { buffer: new Uint8Array(groqChunkBytes), length: 0, tail: Promise.resolve() } : null,
     };
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
     get("live-progress").hidden = true;
+    states.groq.panel.hidden = !run.groq;
     setBusy(true);
     get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
@@ -501,9 +623,8 @@
       }
       if (current !== run) return;
       get("live-status").textContent = "Opening provider streams…";
-      const response = await fetch("/api/live-session", {
-        method: "POST", signal: run.controller.signal, cache: "no-store",
-      });
+      const groqRequest = run.groq ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groq: true }) } : {};
+      const response = await fetch("/api/live-session", { method: "POST", signal: run.controller.signal, cache: "no-store", ...groqRequest });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok && !payload.errors) {
         throw new Error(payload.error || "Live testing requires the configured Vercel API endpoint.");
@@ -512,15 +633,18 @@
       for (const [provider, error] of Object.entries(payload.errors || {})) {
         if (states[provider]) states[provider].status.textContent = error;
       }
+      if (run.groq && payload.groqEnabled) {
+        run.groq.enabled = true;
+        states.groq.status.textContent = "Chunked · 4 s";
+      }
       const setup = { gemini: payload.geminiSetup, openai: payload.openaiSetup };
       await Promise.all(Object.entries(payload.tokens || {}).map(([provider, token]) =>
         connect(run, provider, token, setup[provider])
       ));
       if (current !== run) return;
-      if (!Object.values(run.sockets).some((socket) => socket.readyState === WebSocket.OPEN) || !run.ready.size) {
-        throw new Error("No live provider connected. See the provider status below.");
-      }
       const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
+      if (run.groq?.enabled) activeProviders.push("groq");
+      if (!activeProviders.length) throw new Error("No live provider connected. See the provider status below.");
       const destination = new Intl.ListFormat("en").format(activeProviders.map((provider) => providers[provider].model));
       get("live-status").textContent = mode === "mic"
         ? `Streaming your microphone to ${destination}…`
@@ -573,8 +697,13 @@
   get("live-stage").addEventListener("change", () => {
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
+  function cancelCleanup(run) {
+    if (!run) return;
+    run.cleanupController.abort();
+    for (const pipeline of Object.values(run.pipeline)) clearTimeout(pipeline.timer);
+  }
   window.addEventListener("pagehide", () => {
-    lastRun?.cleanupController.abort();
+    cancelCleanup(lastRun);
     if (current) finish(current, "Test ended.");
   });
   window.LiveBench = { stop };

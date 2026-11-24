@@ -79,9 +79,11 @@ module.exports = async function liveSession(request, response) {
     gemini: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
     openai: process.env.OPENAI_API_KEY,
   };
-  if (!Object.values(keys).some(Boolean)) {
-    return response.status(503).json({ error: "Add DEEPGRAM_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY in Vercel to start live tests." });
+  const groqEnabled = request.body?.groq === true && Boolean(process.env.GROQ_API_KEY);
+  if (!Object.values(keys).some(Boolean) && !groqEnabled) {
+    return response.status(503).json({ error: "Configure a provider API key in Vercel to start live tests." });
   }
   const result = await mintTokens(keys);
-  return response.status(Object.keys(result.tokens).length ? 200 : 502).json({ ...result, geminiSetup, openaiSetup });
+  if (request.body?.groq === true && !groqEnabled) result.errors.groq = "Set GROQ_API_KEY in Vercel to connect.";
+  return response.status(Object.keys(result.tokens).length || groqEnabled ? 200 : 502).json({ ...result, geminiSetup, openaiSetup, groqEnabled });
 };
