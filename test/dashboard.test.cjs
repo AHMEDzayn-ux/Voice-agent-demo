@@ -134,12 +134,14 @@ test("local replay pack imports without adding any provider request", async () =
   assert.match(nodes["player-status"].textContent, /invalid audio/);
 });
 
-test("live view offers bundled recordings and can select a local file without starting a session", () => {
+test("live view starts with only the default provider rows and can select a local file", () => {
   const { nodes } = initDashboard();
   nodes["tab-live"].callbacks.click();
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
-  assert.equal(nodes["live-feeds"].children.filter((panel) => !panel.hidden).length, 3);
+  const visible = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
+  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini"]);
+  assert.match(visible[0].children[2].children[1].children[0].children[0].textContent, /Pipeline timings/);
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
   const recordings = nodes["live-recording"];
@@ -173,6 +175,40 @@ test("live wire sends identical PCM and ignores empty transcript results", () =>
   const gemini = wire.connection("gemini", "auth_tokens/test", { model: "models/gemini-3.8-live" });
   assert.match(gemini.url.pathname, /BidiGenerateContentConstrained$/);
   assert.equal(gemini.url.searchParams.get("access_token"), "auth_tokens/test");
+});
+
+test("an OpenAI credit error stays in the status line while a connected provider uses a row", async () => {
+  class Socket extends EventTarget {
+    static OPEN = 1;
+    static CLOSING = 2;
+    readyState = 0;
+    bufferedAmount = 0;
+    constructor(url) {
+      super();
+      this.openai = url.hostname === "api.openai.com";
+      queueMicrotask(() => { this.readyState = Socket.OPEN; this.dispatchEvent(new Event("open")); });
+    }
+    send() {
+      if (!this.openai) return;
+      const event = new MessageEvent("message", { data: JSON.stringify({ type: "error", error: { code: "credit_balance_exhausted" } }) });
+      this.dispatchEvent(event);
+    }
+    close() { this.readyState = Socket.CLOSING; this.dispatchEvent(new Event("close")); }
+  }
+  const { nodes } = initDashboard("#live", {
+    AbortController, URL, WebSocket: Socket,
+    AudioContext: class { async resume() {} createBufferSource() { return { start() {}, connect() {} }; } },
+    OfflineAudioContext: class { async decodeAudioData() { return { duration: 0.02, length: 320, numberOfChannels: 1, getChannelData: () => new Float32Array(320) }; } },
+    fetch: async (url) => url === "/api/live-session"
+      ? { ok: true, json: async () => ({ tokens: { deepgram: "test", openai: "ek_test" }, openaiSetup: { type: "transcription" }, errors: { gemini: "Gemini unavailable" } }) }
+      : { ok: true, arrayBuffer: async () => new ArrayBuffer(0) },
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+  });
+  await nodes["live-stream"].callbacks.click();
+  const visible = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
+  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram"]);
+  assert.equal(nodes["live-provider-notices"].hidden, false);
+  assert.match(nodes["live-provider-notices"].textContent, /GPT Live Transcribe: API credits exhausted/);
 });
 
 test("OpenAI input keeps the resampling phase and commits speech at a pause", () => {
@@ -405,9 +441,11 @@ test("recording streams to Azure and the other providers and shares identical cl
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
   assert.equal(nodes["live-progress"].hidden, false);
   assert.equal(nodes["live-progress"].max, 0.04);
+  assert.ok(nodes["live-feeds"].children.every((panel) => !panel.hidden));
   for (const panel of nodes["live-feeds"].children.filter((entry) => !entry.className.endsWith("groq"))) {
-    assert.equal(panel.children[2].children[0].textContent, "\u0dc3");
-    assert.equal(panel.children[3].textContent, "Interim received at recording 0:00.0");
+    const [transcript, timing] = panel.children[1].children;
+    assert.equal(transcript.children[0].textContent, "\u0dc3");
+    assert.equal(timing.textContent, "Interim received at recording 0:00.0");
   }
   assert.equal(sent.deepgram.length, 1);
   assert.equal(clocks[0].delay, 20);
@@ -442,18 +480,22 @@ test("recording streams to Azure and the other providers and shares identical cl
   assert.equal(requested.filter((url) => url === "/api/groq-transcribe").length, 1);
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {
+    const [transcript, timing, note] = panel.children[1].children;
+    const [, details] = panel.children[2].children;
+    const [summary, table] = details.children;
     assert.equal(panel.children[0].children[1].textContent, "Complete");
-    assert.equal(panel.children[2].children[0].textContent, final);
-    assert.match(panel.children[3].textContent, /Final received at /);
-    const rows = panel.children[4].children[1].children;
+    assert.equal(transcript.children[0].textContent, final);
+    assert.match(timing.textContent, /Final received at /);
+    assert.match(summary.children[1].textContent, /total$/);
+    const rows = table.children[2].children;
     assert.equal(rows[1].children[1].textContent, "0.0 ms");
     assert.match(rows[2].children[2].textContent, /(?:ms|s)$/);
     assert.match(rows[3].children[2].textContent, /(?:ms|s)$/);
-    assert.match(panel.children[5].textContent, /qwen\/qwen3\.8-27b API 620 ms|Shared cleanup request/);
+    assert.match(note.textContent, /qwen\/qwen3\.8-27b API 620 ms|Shared cleanup request/);
   }
   nodes["live-stage"].value = "llm";
   nodes["live-stage"].callbacks.change();
-  for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[2].children[0].textContent, `${final}.`);
+  for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[1].children[0].children[0].textContent, `${final}.`);
 });
 
 test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digits", async (t) => {

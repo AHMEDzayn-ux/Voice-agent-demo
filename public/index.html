@@ -59,31 +59,33 @@
 
     <section id="live" class="view" role="tabpanel" aria-labelledby="tab-live" tabindex="0" hidden>
       <div class="live-console console">
-        <div class="live-header"><h2>Live transcription</h2><span id="live-clock" class="capture-label">0:00.0</span></div>
-        <div class="live-controls">
-          <div class="clip-select"><label for="live-recording">Recording</label><select id="live-recording"></select></div>
-          <label class="file-action">Choose another audio file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
-        </div>
-        <div class="live-actions">
-          <button class="play" id="live-mic" type="button">Start mic</button>
-          <button class="restart" id="live-stream" type="button">Play &amp; stream</button>
-          <button class="restart" id="live-stop" type="button" disabled>Stop</button>
+        <div class="live-session-bar">
+          <div class="live-controls">
+            <div class="clip-select"><label for="live-recording">Recording</label><select id="live-recording"></select></div>
+            <label class="file-action">Choose file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
+          </div>
+          <div class="live-actions">
+            <button class="play" id="live-stream" type="button">Play &amp; stream</button>
+            <button class="restart" id="live-mic" type="button">Start mic</button>
+            <button class="restart" id="live-stop" type="button" disabled>Stop</button>
+          </div>
+          <span id="live-clock" class="capture-label" aria-label="Recording position">0:00.0</span>
         </div>
         <progress id="live-progress" class="live-progress" max="1" value="0" aria-label="Recording playback position" hidden></progress>
         <p class="player-status" id="live-status" role="status">Recordings play and stream at 1×. Limit two minutes.</p>
       </div>
       <div class="live-view-tools">
-        <label>Show <select id="live-stage">
+        <label>Transcript <select id="live-stage">
           <option value="raw">Raw transcript</option>
           <option value="rules">Deterministic cleanup</option>
           <option value="llm">LLM cleanup</option>
         </select></label>
-        <label><input id="live-llm" type="checkbox"> Run LLM cleanup as STT finalizes</label>
-        <label><input id="live-azure" type="checkbox"> Include Azure Speech</label>
-        <label><input id="live-groq" type="checkbox"> Include Groq Whisper (4 s chunks)</label>
-        <span>Totals start at the first audio packet.</span>
+        <label><input id="live-llm" type="checkbox"> LLM cleanup</label>
+        <label><input id="live-azure" type="checkbox"> Azure Speech</label>
+        <label><input id="live-groq" type="checkbox"> Groq Whisper · 4 s chunks</label>
       </div>
-      <div id="live-feeds" class="transcripts"></div>
+      <p id="live-provider-notices" role="status" class="live-provider-notices" hidden></p>
+      <div id="live-feeds" class="live-feeds"></div>
     </section>
 
     <section id="replay" class="view" role="tabpanel" aria-labelledby="tab-replay" tabindex="0">

@@ -12,6 +12,7 @@
     groq: { name: "Groq", model: "Whisper Large v3" },
     azure: { name: "Microsoft", model: "Azure Speech" },
   };
+  const defaultFeeds = ["deepgram", "gemini"];
   const durationLimit = 120;
   const sampleRate = 16000;
   const groqChunkBytes = 4 * sampleRate * 2;
@@ -59,8 +60,8 @@
 
   const states = {};
   for (const [provider, { name, model }] of Object.entries(providers)) {
-    const panel = make("article", null, `transcript ${provider}`);
-    panel.hidden = provider === "groq" || provider === "azure";
+    const panel = make("article", null, `transcript live-provider ${provider}`);
+    panel.hidden = !defaultFeeds.includes(provider);
     const header = make("header");
     const title = make("div");
     title.append(make("p", name, "provider"), make("h3", model));
@@ -82,8 +83,10 @@
     transcript.setAttribute("aria-label", `${model} live transcript`);
     const timing = make("p", null, "transcript-foot");
     timing.hidden = true;
+    const output = make("div", null, "live-output");
     const pipeline = make("table", null, "live-pipeline");
     pipeline.setAttribute("aria-label", `${model} pipeline latency`);
+    pipeline.append(make("caption", "Totals from the first audio packet."));
     const pipelineHead = make("thead");
     const headings = make("tr");
     for (const label of ["Stage", "Added", "Total"]) {
@@ -106,11 +109,20 @@
       stages[key] = { row, added, total };
     }
     pipeline.append(pipelineHead, pipelineBody);
-    const cleanupNote = make("p", null, "transcript-foot live-cleanup-note");
+    const cleanupNote = make("p", null, "transcript-foot");
     cleanupNote.hidden = true;
-    panel.append(header, metrics, transcript, timing, pipeline, cleanupNote);
+    output.append(transcript, timing, cleanupNote);
+    const pipelineDetails = make("details", null, "live-pipeline-details");
+    const summary = make("summary");
+    const pipelineTotal = make("span", null, "pipeline-summary-total");
+    pipelineTotal.hidden = true;
+    summary.append(make("span", "Pipeline timings"), pipelineTotal);
+    pipelineDetails.append(summary, pipeline);
+    const measurements = make("div", null, "live-provider-metrics");
+    measurements.append(metrics, pipelineDetails);
+    panel.append(header, output, measurements);
     get("live-feeds").append(panel);
-    states[provider] = { panel, status, fields, transcript, timing, stages, cleanupNote };
+    states[provider] = { panel, status, fields, transcript, timing, stages, cleanupNote, pipelineTotal };
   }
 
   function formatDuration(ms) {
@@ -132,6 +144,9 @@
       stage.total.textContent = formatDuration(total);
     }
     ui.stages.wait.row.hidden = !llm;
+    const total = llm?.text ? llm.totalMs : pipeline?.rulesTotal;
+    ui.pipelineTotal.hidden = !Number.isFinite(total);
+    ui.pipelineTotal.textContent = Number.isFinite(total) ? `${formatDuration(total)} total` : "";
     const notes = [];
     if (llm?.error) notes.push(llm.error);
     if (pipeline?.skipped) notes.push("Kept deterministic text for this fragment.");
@@ -289,6 +304,24 @@
     get("live-stop").disabled = !busy;
   }
 
+  function showProviderRows(active, requested = []) {
+    const visible = new Set(active);
+    for (const [provider, ui] of Object.entries(states)) ui.panel.hidden = !visible.has(provider);
+    const issues = requested.filter((provider) => !visible.has(provider)).map((provider) => {
+      const status = states[provider].status.textContent;
+      const message = status === "Connecting" ? "Unavailable" : status.replace(/^OpenAI /, "");
+      return `${providers[provider].model}: ${message}`;
+    });
+    const notice = get("live-provider-notices");
+    notice.textContent = issues.join(" · ");
+    notice.hidden = issues.length === 0;
+  }
+
+  function hideFailedEmptyRow(run, provider) {
+    if (run.events[provider].some((event) => event[1].trim()) || !run.visibleProviders?.delete(provider)) return;
+    showProviderRows(run.visibleProviders, run.requestedProviders);
+  }
+
   function releaseAudio(run) {
     if (run.playback && run.playback.stoppedAt === null) {
       run.playback.stoppedAt = playbackPosition(run);
@@ -390,6 +423,7 @@
       if (current !== run) return;
       run.failed.add("azure");
       states.azure.status.textContent = message;
+      hideFailedEmptyRow(run, "azure");
     };
     try {
       if (preparation.error) throw preparation.error;
@@ -420,6 +454,7 @@
       catch {
         run.failed.add("azure");
         states.azure.status.textContent = "Could not send audio to Azure";
+        hideFailedEmptyRow(run, "azure");
       }
     }
     for (const [provider, socket] of Object.entries(run.sockets)) {
@@ -427,6 +462,7 @@
       if (socket.bufferedAmount > 65536) {
         run.failed.add(provider);
         states[provider].status.textContent = "Network fell behind";
+        hideFailedEmptyRow(run, provider);
         socket.close();
         continue;
       }
@@ -438,6 +474,7 @@
       catch {
         run.failed.add(provider);
         states[provider].status.textContent = "Could not send audio";
+        hideFailedEmptyRow(run, provider);
       }
     }
     if (!sent && !run.stopping) stop("All live streams disconnected.");
@@ -479,6 +516,7 @@
                 ? "OpenAI API credits exhausted"
                 : typeof code === "string" && /^[\w-]{1,48}$/.test(code) ? `OpenAI error (${code})` : "OpenAI session error";
               run.failed.add(provider);
+              hideFailedEmptyRow(run, provider);
               socket.close();
               return;
             }
@@ -501,6 +539,7 @@
         if (current === run && !run.stopping && !run.failed.has(provider)) {
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
+          hideFailedEmptyRow(run, provider);
           if (run.started !== null && !run.groq?.enabled && !run.azure?.active && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
             stop("All live streams disconnected.");
           }
@@ -634,8 +673,7 @@
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
     get("live-progress").hidden = true;
-    states.groq.panel.hidden = !run.groq;
-    states.azure.panel.hidden = !run.wantsAzure;
+    showProviderRows(defaultFeeds);
     setBusy(true);
     get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
@@ -698,6 +736,12 @@
       const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
       if (run.groq?.enabled) activeProviders.push("groq");
       if (run.azure?.active) activeProviders.push("azure");
+      const requested = [...defaultFeeds, ...Object.keys(payload.tokens || {})];
+      if (run.groq) requested.push("groq");
+      if (run.wantsAzure) requested.push("azure");
+      run.requestedProviders = [...new Set(requested)];
+      run.visibleProviders = new Set(activeProviders);
+      showProviderRows(run.visibleProviders, run.requestedProviders);
       if (!activeProviders.length) throw new Error("No live provider connected. See the provider status below.");
       const destination = new Intl.ListFormat("en").format(activeProviders.map((provider) => providers[provider].model));
       get("live-status").textContent = mode === "mic"
