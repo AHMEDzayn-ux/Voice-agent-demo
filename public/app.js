@@ -196,7 +196,7 @@ function tick() {
   render(time);
   if (tail && time >= timelineEnd) {
     tail = { seconds: timelineEnd, startedAt: null };
-    el("player-status").textContent = "Replay complete. Review the three cleanup stages below.";
+    el("player-status").textContent = "Replay complete. Open Cleanup to compare all three outputs.";
     syncButton();
     return;
   }
@@ -264,6 +264,55 @@ function seek(time) {
   refresh();
 }
 
+function showResults() {
+  audio.pause();
+  tail = null;
+  seek(timelineEnd);
+  for (const id of ["deepgram-text", "gemini-text", "raw-output", "rules-output", "llm-output"]) {
+    el(id).scrollTop = 0;
+  }
+  el("player-status").textContent = "Showing all captured results.";
+}
+
+function setupViews() {
+  const views = ["replay", "cleanup", "benchmark"];
+  const fromHash = () => {
+    const name = window.location.hash.slice(1);
+    if (name === "method" || name === "decision") return "benchmark";
+    return views.includes(name) ? name : "replay";
+  };
+  function activate(name, updateHash = false) {
+    for (const view of views) {
+      const selected = view === name;
+      el(view).hidden = !selected;
+      const tab = el(`tab-${view}`);
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    if (updateHash && window.location.hash !== `#${name}`) {
+      window.history.replaceState(null, "", `#${name}`);
+    }
+  }
+  for (const [index, view] of views.entries()) {
+    const tab = el(`tab-${view}`);
+    tab.addEventListener("click", () => activate(view, true));
+    tab.addEventListener("keydown", (event) => {
+      const next = {
+        ArrowLeft: (index + views.length - 1) % views.length,
+        ArrowRight: (index + 1) % views.length,
+        Home: 0,
+        End: views.length - 1,
+      }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      activate(views[next], true);
+      el(`tab-${views[next]}`).focus();
+    });
+  }
+  window.addEventListener("hashchange", () => activate(fromHash()));
+  activate(fromHash());
+}
+
 function median(values) {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -326,6 +375,8 @@ function updateCost() {
   el("cost-result").textContent = output.join("  |  ") || "Enter valid provider rates to get an estimate.";
 }
 
+setupViews();
+
 if (window.DEMO_DATA && core) {
   const { clips, metrics } = window.DEMO_DATA;
   const choices = el("clip");
@@ -370,8 +421,10 @@ if (window.DEMO_DATA && core) {
   }
   el("play").addEventListener("click", togglePlayback);
   el("restart").addEventListener("click", () => seek(0));
+  el("results").addEventListener("click", showResults);
   slider.addEventListener("input", () => seek(Number(slider.value)));
   audio.addEventListener("ended", () => {
+    if (tail) return;
     tail = { seconds: clip.duration, startedAt: performance.now() };
     el("player-status").textContent = "Audio finished. Replaying final transcript and cleanup events.";
     syncButton();
@@ -386,5 +439,5 @@ if (window.DEMO_DATA && core) {
   renderMetrics(metrics);
 } else {
   el("player-status").textContent = "The demo data could not be loaded.";
-  for (const id of ["play", "restart", "position", "clip"]) el(id).disabled = true;
+  for (const id of ["play", "restart", "results", "position", "clip", "scenario"]) el(id).disabled = true;
 }

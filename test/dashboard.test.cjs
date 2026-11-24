@@ -11,7 +11,7 @@ const site = path.join(__dirname, "..", "public");
 const load = (file) => fs.readFileSync(path.join(site, file), "utf8");
 const html = load("index.html");
 
-function initDashboard() {
+function initDashboard(initialHash = "") {
   function node() {
     return {
       children: [], callbacks: {}, style: {}, textContent: "", value: "", clientWidth: 420, clientHeight: 54,
@@ -19,6 +19,7 @@ function initDashboard() {
       replaceChildren(...items) { this.children = items; },
       addEventListener(name, callback) { this.callbacks[name] = callback; },
       setAttribute(name, value) { this[name] = value; },
+      focus() { this.focused = true; },
       classList: { toggle() {} },
       getContext() { return { setTransform() {}, clearRect() {}, fillRect() {} }; },
       checkValidity() { return Number(this.value) >= 0; },
@@ -37,14 +38,17 @@ function initDashboard() {
   const browser = {
     document: { getElementById: (id) => nodes[id], createElement: node },
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, performance: { now: () => 123 },
-    devicePixelRatio: 2, addEventListener() {},
+    location: { hash: initialHash },
+    history: { replaceState(_state, _title, hash) { browser.location.hash = hash; } },
+    listeners: {},
+    devicePixelRatio: 2, addEventListener(name, callback) { this.listeners[name] = callback; },
   };
   browser.window = browser;
   const sandbox = vm.createContext(browser);
   for (const file of ["assets/demo-data.js", "demo-core.js", "app.js"]) {
     vm.runInContext(load(file), sandbox, { filename: file });
   }
-  return { nodes, data: browser.DEMO_DATA };
+  return { nodes, data: browser.DEMO_DATA, browser };
 }
 
 test("Unicode rules, literal approved terms, and numeric guard", () => {
@@ -54,6 +58,47 @@ test("Unicode rules, literal approved terms, and numeric guard", () => {
   assert.throws(() => core.parseGlossary("bad row"), /heard term/);
   assert.equal(core.digitsChanged("call 070 32", "call 070 33"), true);
   assert.equal(core.digitsChanged("070 32", "070   32!"), false);
+});
+
+test("comparison tabs are exclusive, keyboard-accessible, and preserve playback", async () => {
+  const { nodes, browser } = initDashboard();
+  assert.equal(nodes.replay.hidden, false);
+  assert.equal(nodes.cleanup.hidden, true);
+  assert.equal(nodes.benchmark.hidden, true);
+  await nodes.play.callbacks.click();
+  nodes["tab-cleanup"].callbacks.click();
+  assert.equal(nodes.replay.hidden, true);
+  assert.equal(nodes.cleanup.hidden, false);
+  assert.equal(nodes.audio.paused, false);
+  assert.equal(browser.location.hash, "#cleanup");
+  let prevented = false;
+  nodes["tab-cleanup"].callbacks.keydown({ key: "ArrowRight", preventDefault() { prevented = true; } });
+  assert.ok(prevented);
+  assert.equal(nodes.benchmark.hidden, false);
+  assert.equal(nodes.cleanup.hidden, true);
+  assert.equal(nodes["tab-benchmark"].focused, true);
+  assert.equal(nodes["tab-benchmark"].tabIndex, 0);
+  assert.equal(nodes["tab-cleanup"].tabIndex, -1);
+  browser.location.hash = "#replay";
+  browser.listeners.hashchange();
+  assert.equal(nodes.replay.hidden, false);
+  assert.equal(nodes.benchmark.hidden, true);
+  assert.equal(initDashboard("#cleanup").nodes.cleanup.hidden, false);
+});
+
+test("Show results pauses and reveals both transcripts and captured cleanup", async () => {
+  const { nodes, data } = initDashboard();
+  await nodes.play.callbacks.click();
+  nodes.results.callbacks.click();
+  assert.equal(nodes.audio.paused, true);
+  assert.equal(nodes.position.value, nodes.position.max);
+  assert.match(nodes["deepgram-status"].textContent, /captured/i);
+  assert.match(nodes["gemini-status"].textContent, /captured/i);
+  assert.equal(nodes["llm-output"].textContent, data.clips[0].cleanup.deepgram.text);
+  assert.equal(nodes["deepgram-text"].scrollTop, 0);
+  nodes.audio.callbacks.ended();
+  assert.equal(nodes.position.value, nodes.position.max);
+  assert.equal(nodes["player-status"].textContent, "Showing all captured results.");
 });
 
 test("accuracy uses edits and ignores cosmetic formatting", () => {

@@ -5,10 +5,10 @@ A static benchmark demo comparing Deepgram Nova‑3 and Gemini 3.8 Live for a Si
 ## Present the demo
 
 1. Choose **Pauses and restarts** or **Sinhala–English code-switching**, then switch between clean audio, G.711 A-law, and 10 dB telephone noise.
-2. Play the 1× replay or scrub the waveform. The first-text, first-Sinhala, first-final and interim-event measurements appear as the captured events arrive.
-3. Compare **Raw**, **Deterministic**, and **LLM cleanup** for either provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
+2. Use **Streams** to watch both providers side by side. Play the 1× replay or scrub the waveform. **Show results** jumps to the full outputs.
+3. Open **Cleanup** to compare **Raw**, **Deterministic**, and **LLM cleanup** for either provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
 4. Paste a human-verified reference for the selected scenario to reveal CER and WER once the transcripts finish. Optionally enter approved terms as `heard term => approved term`, one per line. The reference and glossary stay in the browser tab.
-5. Use the three-call benchmark, rollout checks, and optional cost calculator to discuss the choice. The small call set is a pilot, and character and word scores need verified references.
+5. Open **Benchmarks** for the three-call pilot, rollout checks, and optional cost calculator. Accuracy scores need verified references.
 
 ## Deploy to Vercel
 

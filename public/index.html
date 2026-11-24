@@ -14,25 +14,22 @@
 <body>
   <header class="masthead">
     <div class="wrap masthead-inner">
-      <a class="wordmark" href="#top"><span class="brand-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>Sinhala STT</a>
-      <nav aria-label="Page sections"><a href="#replay">Stream</a><a href="#cleanup">Cleanup</a><a href="#benchmark">Benchmarks</a></nav>
+      <div class="wordmark"><span class="brand-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><h1>Sinhala STT benchmark</h1></div>
+      <div class="view-tabs" role="tablist" aria-label="Comparison views">
+        <button type="button" id="tab-replay" role="tab" aria-selected="true" aria-controls="replay">Streams</button>
+        <button type="button" id="tab-cleanup" role="tab" aria-selected="false" aria-controls="cleanup" tabindex="-1">Cleanup</button>
+        <button type="button" id="tab-benchmark" role="tab" aria-selected="false" aria-controls="benchmark" tabindex="-1">Benchmarks</button>
+      </div>
     </div>
   </header>
-  <main id="top">
-    <div class="hero wrap">
-      <p class="eyebrow">Voice-agent benchmark</p>
-      <h1>Sinhala STT<br><em>for live calls.</em></h1>
-      <p class="hero-copy">Compare how soon Deepgram Nova-3 and Gemini Live show usable text, then check whether cleanup improves the transcript enough to justify the wait.</p>
-    </div>
-
-    <section id="replay" class="wrap" aria-labelledby="replay-title">
-      <div class="console">
+  <main class="wrap workspace">
+    <section class="console" aria-label="Shared replay controls">
         <div class="console-heading">
-          <div><p class="kicker">Captured WebSocket replay · 1×</p><h2 id="replay-title">Follow both streams</h2></div>
           <div class="selectors">
             <div class="clip-select"><label for="scenario">Call scenario</label><select id="scenario"></select></div>
             <div class="clip-select"><label for="clip">Audio condition</label><select id="clip"></select></div>
           </div>
+          <span class="capture-label">Captured WebSocket replay · 1×</span>
         </div>
         <div class="player">
           <button class="play" id="play" type="button"><span id="play-label">Play</span><span class="play-icon" aria-hidden="true"></span></button>
@@ -41,14 +38,19 @@
             <input id="position" type="range" min="0" max="1" step="0.01" value="0" aria-label="Playback position">
             <div class="time-row"><span id="clock">0:00.0</span><span id="duration">0:00.0</span></div>
           </div>
-          <button class="restart" id="restart" type="button">Restart</button>
+          <div class="transport-actions">
+            <button class="restart" id="restart" type="button">Restart</button>
+            <button class="results" id="results" type="button" title="Skip playback and show all captured outputs">Show results</button>
+          </div>
           <audio id="audio" preload="metadata"></audio>
         </div>
         <div class="player-status-row">
           <p id="player-status" role="status" class="player-status">Play the audio to replay the captured transcript events.</p>
           <span id="endpoint-info"></span>
         </div>
-      </div>
+    </section>
+
+    <section id="replay" class="view" role="tabpanel" aria-labelledby="tab-replay" tabindex="0">
       <div class="transcripts">
         <article class="transcript deepgram">
           <header><div><p class="provider">Deepgram</p><h3>Nova-3</h3></div><span class="feed-status" id="deepgram-status">Waiting</span></header>
@@ -65,11 +67,7 @@
       </div>
     </section>
 
-    <section id="cleanup" class="wrap bench-section" aria-labelledby="cleanup-title">
-      <div class="section-title">
-        <div><p class="eyebrow">Post-processing</p><h2 id="cleanup-title">Is cleanup worth it?</h2></div>
-        <p>Compare three outputs for the same stream. Rules update as text arrives. The demo replays a captured LLM request on the finished transcript.</p>
-      </div>
+    <section id="cleanup" class="view" role="tabpanel" aria-labelledby="tab-cleanup" tabindex="0" hidden>
       <div class="cleanup-toolbar">
         <div class="local-select"><label for="cleanup-provider">Transcription provider</label><select id="cleanup-provider"><option value="deepgram">Deepgram Nova-3</option><option value="gemini">Gemini 3.8 Live</option></select></div>
         <details class="options">
@@ -81,7 +79,8 @@
           <p id="glossary-error" role="status"></p>
         </details>
       </div>
-      <div class="cleanup-grid">
+      <p class="swipe-note">Swipe across to compare all three outputs.</p>
+      <div class="cleanup-grid" role="region" aria-label="Raw, deterministic, and LLM outputs" tabindex="0">
         <article class="stage"><h3>Raw</h3><p class="stage-meta">From the streaming provider</p><div id="raw-output" class="stage-output" lang="si" tabindex="0"></div><p id="raw-score" class="stage-score"></p></article>
         <article class="stage"><h3>Deterministic</h3><p class="stage-meta" id="rules-meta">Runs in your browser</p><div id="rules-output" class="stage-output" lang="si" tabindex="0"></div><p id="rules-score" class="stage-score"></p><p id="rules-guard" class="guard"></p></article>
         <article class="stage"><h3>LLM cleanup</h3><p class="stage-meta" id="llm-meta">Captured Gemini Flash-Lite request</p><div id="llm-output" class="stage-output" lang="si" tabindex="0"></div><p id="llm-score" class="stage-score"></p><p id="llm-guard" class="guard"></p></article>
@@ -89,10 +88,10 @@
       <p class="section-note" id="cleanup-note">Replay the selected sample all the way through to score complete transcripts.</p>
     </section>
 
-    <section id="benchmark" class="wrap benchmark" aria-labelledby="benchmark-title">
+    <section id="benchmark" class="view" role="tabpanel" aria-labelledby="tab-benchmark" tabindex="0" hidden>
       <div class="section-title">
-        <div><p class="eyebrow">Three real calls</p><h2 id="benchmark-title">When does text arrive?</h2></div>
-        <p>Median delay from estimated speech onset, measured at 1× over live WebSockets.</p>
+        <h2>Three real calls</h2>
+        <p>Median delay from estimated speech onset at 1×.</p>
       </div>
       <div class="metrics" id="metrics"></div>
       <div class="rollup">
@@ -108,19 +107,15 @@
           </table>
         </div>
       </details>
-    </section>
-
-    <section id="decision" class="wrap bench-section" aria-labelledby="decision-title">
-      <div class="section-title">
-        <div><p class="eyebrow">Call-center rollout</p><h2 id="decision-title">What decides the pick?</h2></div>
-        <p>Use the replay to shortlist a provider. Use the same call mix and quality checks before switching traffic.</p>
-      </div>
-      <div class="decision-grid">
-        <article class="decision-card"><h3>Responsiveness</h3><p>Compare time to first text and final text during pauses and over G.711. Measure end-of-turn to agent audio in your own stack.</p></article>
-        <article class="decision-card"><h3>Accuracy and safety</h3><p>Score verified calls by noise and language mix. Check names, numbers, negation and English terms before trusting cleanup.</p></article>
-        <article class="decision-card"><h3>Reliability and cost</h3><p>Test dropped sessions, no-text cases and p95 latency at peak concurrency. Price the actual audio, model output and cleanup usage.</p></article>
-      </div>
-      <details class="cost-panel">
+      <details class="per-call" id="decision">
+        <summary>Call-center rollout checks</summary>
+        <div class="decision-grid">
+          <article class="decision-card"><h3>Responsiveness</h3><p>Compare first and final text during pauses and over G.711. Measure end-of-turn to agent audio in your own stack.</p></article>
+          <article class="decision-card"><h3>Accuracy and safety</h3><p>Score verified calls by noise and language mix. Check names, numbers, negation and English terms.</p></article>
+          <article class="decision-card"><h3>Reliability and cost</h3><p>Track dropped sessions, no-text cases and p95 latency at peak concurrency. Price audio, model output and cleanup.</p></article>
+        </div>
+      </details>
+      <details class="per-call cost-panel">
         <summary>Estimate monthly processing cost</summary>
         <div class="cost-inputs">
           <label>Minutes per month<input id="minutes" type="number" min="0" value="10000"></label>
@@ -131,17 +126,16 @@
         </div>
         <p id="cost-result">Enter your provider rates to get an estimate.</p>
       </details>
-    </section>
-    <section id="method" class="wrap method" aria-labelledby="method-title">
-      <h2 id="method-title">How we measured</h2>
-      <dl>
-        <div><dt>Streaming</dt><dd>Both providers received the same 16 kHz mono signal at 1× speed in 20 ms chunks. G.711 clips were A-law round-tripped before replay. The demo uses captured events.</dd></div>
-        <div><dt>Language</dt><dd>Nova-3 used Sinhala mode and Gemini Live used the <code>si</code> hint. A text event with Sinhala characters is a script check.</dd></div>
-        <div><dt>Timing</dt><dd>Silero VAD estimated speech boundaries. First final text can arrive before the caller finishes. End-of-speech timing uses the last text if it arrived after the estimated last speech, so validate turn timing separately.</dd></div>
-        <div><dt>Cleanup</dt><dd>Compare candidates against a human-verified reference. CER uses graphemes where supported. Both error rates ignore punctuation, case and formatting, so presentation-only edits will leave scores unchanged.</dd></div>
-      </dl>
+      <details id="method" class="per-call method">
+        <summary>How we measured</summary>
+        <dl>
+          <div><dt>Streaming</dt><dd>Same 16 kHz mono audio at 1× speed in 20 ms chunks. G.711 clips were A-law round-tripped. The demo replays captured events.</dd></div>
+          <div><dt>Language</dt><dd>Nova-3 used Sinhala mode. Gemini used the <code>si</code> hint. First Sinhala is a script check.</dd></div>
+          <div><dt>Timing</dt><dd>Silero VAD estimated speech boundaries. First final can arrive before the caller finishes speaking.</dd></div>
+          <div><dt>Cleanup</dt><dd>CER and WER use a human-verified reference. The scores ignore formatting and punctuation. LLM delay comes from the captured Flash-Lite request.</dd></div>
+        </dl>
+      </details>
     </section>
   </main>
-  <footer><div class="wrap"><span>Sinhala STT benchmark</span><span>Simulated audio and anonymous call timings</span></div></footer>
 </body>
 </html>
