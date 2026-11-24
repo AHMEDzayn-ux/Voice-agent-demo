@@ -17,13 +17,12 @@ Import this repository and deploy `main`. Use **Other** if Vercel asks for a fra
 
 ### Enable the Live test
 
-Set these server-side environment variables in the Vercel project, then redeploy:
+Set one or both of these server-side environment variables in the Vercel project, then redeploy. Both are needed for a side-by-side test.
 
 - `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
-- `LIVE_TEST_ENABLED` — set to `1` to let visitors start live sessions. You can delete the old `LIVE_TEST_PASSCODE` variable.
 
-Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The demo clips are already in the picker. Use **Load real calls** to add the calls from `real-call-replay.private.json` in your current tab, or **Choose audio file** to add an individual file. Loading a local file does not send it to the providers. When you start the test, the browser sends identical 20 ms packets of 16 kHz mono audio directly to each connected provider at normal speed for fresh transcripts. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. When live testing is enabled, anyone who can access the deployment can run tests using your provider quotas.
+Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The picker includes three original call recordings and six simulated recordings. Use **Choose another audio file** to select a different file from your device. When you start the test, the browser sends identical 20 ms packets of 16 kHz mono audio directly to each connected provider at normal speed for fresh transcripts. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
 ## Preview and test
 
@@ -39,4 +38,4 @@ Open [localhost:8080](http://localhost:8080). Run the dependency-free checks wit
 node --test
 ```
 
-The replay contains simulated audio and captured outputs. The deployed real-call section contains only anonymized numerical measurements. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.
+The Streams replay contains simulated audio and captured outputs. Benchmarks includes anonymized numerical measurements for the three calls in the Live test picker. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.

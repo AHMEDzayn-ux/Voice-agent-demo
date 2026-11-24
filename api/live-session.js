@@ -23,9 +23,9 @@ async function tokenRequest(provider, url, keyHeader, body, field) {
 async function mintTokens(deepgramKey, geminiKey) {
   const now = Date.now();
   const calls = [
-    tokenRequest("Deepgram", "https://api.deepgram.com/v1/auth/grant",
+    deepgramKey && tokenRequest("Deepgram", "https://api.deepgram.com/v1/auth/grant",
       { Authorization: `Token ${deepgramKey}` }, { ttl_seconds: 30 }, "access_token"),
-    tokenRequest("Gemini", "https://generativelanguage.googleapis.com/v1beta/auth_tokens",
+    geminiKey && tokenRequest("Gemini", "https://generativelanguage.googleapis.com/v1beta/auth_tokens",
       { "x-goog-api-key": geminiKey }, {
         uses: 1,
         expireTime: new Date(now + 180000).toISOString(),
@@ -37,8 +37,10 @@ async function mintTokens(deepgramKey, geminiKey) {
   const body = { tokens: {}, errors: {} };
   for (const [i, name] of ["deepgram", "gemini"].entries()) {
     const result = results[i];
-    if (result.status === "fulfilled") body.tokens[name] = result.value;
-    else {
+    if (result.status === "fulfilled") {
+      if (result.value) body.tokens[name] = result.value;
+      else body.errors[name] = `Set ${name === "deepgram" ? "DEEPGRAM_API_KEY" : "GOOGLE_API_KEY"} in Vercel to connect.`;
+    } else {
       const message = result.reason?.message ?? "";
       body.errors[name] = /^(Deepgram|Gemini) (token request returned HTTP \d+|returned no usable token)\.$/.test(message)
         ? message : "Could not reach the provider's token endpoint.";
@@ -58,8 +60,8 @@ module.exports = async function liveSession(request, response) {
   }
   const deepgramKey = process.env.DEEPGRAM_API_KEY;
   const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-  if (process.env.LIVE_TEST_ENABLED !== "1" || !deepgramKey || !geminiKey) {
-    return response.status(503).json({ error: "Live testing is disabled. Set LIVE_TEST_ENABLED=1 and configure both provider keys in Vercel." });
+  if (!deepgramKey && !geminiKey) {
+    return response.status(503).json({ error: "Add DEEPGRAM_API_KEY or GOOGLE_API_KEY to the Vercel deployment to start live tests." });
   }
   const result = await mintTokens(deepgramKey, geminiKey);
   return response.status(Object.keys(result.tokens).length ? 200 : 502).json({ ...result, geminiSetup });

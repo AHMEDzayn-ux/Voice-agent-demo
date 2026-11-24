@@ -9,6 +9,14 @@
   const sampleRate = 16000;
   const recordingSelect = get("live-recording");
   const localFileId = "local-file";
+  const realRecordings = [1, 2, 3].map((number) => ({
+    id: `real-call-${number}`, label: `Real call ${number}`,
+    audio: `assets/real-calls/real_call_0${number}.mp3`,
+  }));
+  const demoRecordings = (window.DEMO_DATA?.clips || []).map(({ id, scenarioLabel, label, audio }) => ({
+    id, label: `${scenarioLabel} · ${label}`, audio,
+  }));
+  const recordings = new Map([...realRecordings, ...demoRecordings].map((recording) => [recording.id, recording]));
   let localFile = null;
   let current = null;
   let lastRun = null;
@@ -21,29 +29,24 @@
   };
 
   function refreshRecordings(selected = recordingSelect.value) {
-    const demo = make("optgroup");
-    demo.label = "Demo recordings";
-    const device = make("optgroup");
-    device.label = "On this device";
-    const ids = [];
-    for (const clip of window.DEMO_DATA?.clips || []) {
-      const real = clip.id.startsWith("private/");
-      const option = make("option", real ? clip.scenarioLabel : `${clip.scenarioLabel} · ${clip.label}`);
-      option.value = clip.id;
-      ids.push(clip.id);
-      (real ? device : demo).append(option);
-    }
-    if (localFile) {
-      const option = make("option", localFile.name);
-      option.value = localFileId;
-      ids.push(localFileId);
-      device.append(option);
-    }
     recordingSelect.replaceChildren();
-    if (demo.children.length) recordingSelect.append(demo);
-    if (device.children.length) recordingSelect.append(device);
-    recordingSelect.value = ids.includes(selected) ? selected : ids[0] || "";
-    get("live-stream").disabled = Boolean(current) || !ids.length;
+    const groups = [
+      ["Real calls", realRecordings],
+      ["Simulated recordings", demoRecordings],
+      ["On this device", localFile ? [{ id: localFileId, label: localFile.name }] : []],
+    ];
+    for (const [label, items] of groups) {
+      if (!items.length) continue;
+      const group = make("optgroup");
+      group.label = label;
+      for (const item of items) {
+        const option = make("option", item.label);
+        option.value = item.id;
+        group.append(option);
+      }
+      recordingSelect.append(group);
+    }
+    recordingSelect.value = selected || realRecordings[0].id;
   }
 
   const states = {};
@@ -93,7 +96,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file", "live-load-real"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -116,6 +119,9 @@
         states[provider].status.textContent = core.observe(run.events[provider], Infinity).first === null
           ? "No text" : "Complete";
       }
+    }
+    for (const { status } of Object.values(states)) {
+      if (status.textContent === "Connecting") status.textContent = "Unavailable";
     }
     get("live-status").textContent = text;
     setBusy(false);
@@ -245,7 +251,7 @@
     if (current) return;
     const selected = recordingSelect.value;
     const file = selected === localFileId ? localFile : null;
-    const clip = window.DEMO_DATA?.clips.find((entry) => entry.id === selected);
+    const clip = recordings.get(selected);
     if (mode === "recording" && !file && !clip) {
       return get("live-status").textContent = "Choose a recording to stream.";
     }
@@ -283,7 +289,7 @@
         await context.audioWorklet.addModule("mic-pcm.js");
       }
       if (current !== run) return;
-      get("live-status").textContent = "Opening both provider streams…";
+      get("live-status").textContent = "Opening provider streams…";
       const response = await fetch("/api/live-session", {
         method: "POST", signal: run.controller.signal, cache: "no-store",
       });
@@ -302,7 +308,11 @@
       if (!Object.values(run.sockets).some((socket) => socket.readyState === WebSocket.OPEN) || !run.ready.size) {
         throw new Error("Neither live provider connected. See the provider status below.");
       }
-      get("live-status").textContent = mode === "mic" ? "Listening to your microphone…" : "Streaming the recording at 1×…";
+      const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
+      const destination = activeProviders.map((provider) => providerNames[provider]).join(" and ");
+      get("live-status").textContent = mode === "mic"
+        ? `Streaming your microphone to ${destination}…`
+        : `Streaming the recording at 1× to ${destination}…`;
       const waitingSince = performance.now();
       run.clock = setInterval(() => {
         if (run.started === null) {
@@ -351,6 +361,6 @@
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
   window.addEventListener("pagehide", () => { if (current) finish(current, "Test ended."); });
-  window.LiveBench = { stop, refreshRecordings };
+  window.LiveBench = { stop };
   refreshRecordings();
 })();

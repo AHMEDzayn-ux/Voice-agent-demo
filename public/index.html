@@ -61,17 +61,14 @@
         <div class="live-header"><h2>Live transcription</h2><span id="live-clock" class="capture-label">0:00</span></div>
         <div class="live-controls">
           <div class="clip-select"><label for="live-recording">Recording</label><select id="live-recording"></select></div>
-          <div class="live-file-actions">
-            <label class="file-action">Load real calls<input id="live-load-real" type="file" accept=".json,application/json" aria-label="Load private real-call file"></label>
-            <label class="file-action">Choose audio file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
-          </div>
+          <label class="file-action">Choose another audio file<input id="live-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg"></label>
         </div>
         <div class="live-actions">
           <button class="play" id="live-mic" type="button">Start mic</button>
           <button class="restart" id="live-stream" type="button">Stream recording</button>
           <button class="restart" id="live-stop" type="button" disabled>Stop</button>
         </div>
-        <p class="player-status" id="live-status" role="status">Recordings stream at 1× to both providers for fresh transcripts. Limit two minutes.</p>
+        <p class="player-status" id="live-status" role="status">Recordings stream at 1× for fresh transcripts. Limit two minutes.</p>
       </div>
       <div class="live-view-tools">
         <span>Times start at the first audio packet.</span>

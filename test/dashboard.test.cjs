@@ -29,7 +29,7 @@ function initDashboard(initialHash = "", runtime = {}) {
   }
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);
-  const nodes = Object.fromEntries(ids.map((id) => [id, Object.assign(node(), { id })]));
+  const nodes = Object.fromEntries(ids.map((id) => [id, node()]));
   Object.assign(nodes.audio, {
     paused: true, currentTime: 0, duration: 28.224, ended: false,
     pause() { this.paused = true; },
@@ -121,7 +121,6 @@ test("local replay pack imports without adding any provider request", async () =
   assert.equal(data.clips.length, 7);
   assert.equal(nodes.scenario.value, "private/1");
   assert.equal(nodes.audio.src, "blob:test-call");
-  assert.equal(nodes["live-recording"].value, "private/1");
   nodes.results.callbacks.click();
   assert.equal(nodes["raw-output"].textContent, "private test");
   assert.equal(nodes["llm-output"].children[0].textContent, "Cleanup was unavailable for this stream.");
@@ -138,14 +137,18 @@ test("live view offers bundled recordings and can select a local file without st
   assert.equal(nodes["replay-console"].hidden, true);
   assert.equal(nodes["live-feeds"].children.length, 2);
   assert.equal(nodes["live-passcode"], undefined);
+  assert.equal(nodes["live-load-real"], undefined);
   const recordings = nodes["live-recording"];
-  assert.equal(recordings.children[0].children.length, 6);
-  assert.equal(recordings.value, "pause_and_talk/clean");
+  assert.equal(recordings.children[0].label, "Real calls");
+  assert.deepEqual(recordings.children[0].children.map((option) => option.textContent), ["Real call 1", "Real call 2", "Real call 3"]);
+  for (const index of [1, 2, 3]) assert.ok(fs.statSync(path.join(site, `assets/real-calls/real_call_0${index}.mp3`)).size > 0);
+  assert.equal(recordings.children[1].children.length, 6);
+  assert.equal(recordings.value, "real-call-1");
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
   input.callbacks.change({ target: input });
   assert.equal(recordings.value, "local-file");
-  assert.equal(recordings.children[1].children[0].textContent, "sample.mp3");
+  assert.equal(recordings.children[2].children[0].textContent, "sample.mp3");
   assert.match(nodes["live-status"].textContent, /ready/);
   nodes["tab-replay"].callbacks.click();
   assert.equal(nodes["replay-console"].hidden, false);
@@ -240,15 +243,12 @@ test("a selected real call streams fresh, identical 20 ms packets to both provid
     }
   }
   const requested = [];
-  let nextUrl = 0;
-  class TestURL extends URL {
-    static createObjectURL() { return `blob:test-call-${++nextUrl}`; }
-  }
+  const audio = "assets/real-calls/real_call_03.mp3";
   const { nodes } = initDashboard("#live", {
-    URL: TestURL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
+    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
     async fetch(url, options) {
       requested.push(url);
-      if (url === "blob:test-call-3") return { ok: true, arrayBuffer: async () => new ArrayBuffer(10) };
+      if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
       assert.equal(options.body, undefined);
@@ -265,19 +265,10 @@ test("a selected real call streams fresh, identical 20 ms packets to both provid
     },
     clearTimeout() {},
   });
-  const input = nodes["live-load-real"];
-  const call = {
-    audioBase64: "YQ==", duration: 0.04, speechStart: 0, speechEnd: 0.04,
-    wave: Array(160).fill(0.3), events: { deepgram: [], gemini: [] },
-  };
-  input.files = [{ size: 30, text: async () => JSON.stringify({ version: 1, calls: [call, call, call] }) }];
-  await input.callbacks.change({ target: input });
-  assert.match(nodes["live-status"].textContent, /Loaded 3 real calls/);
-  assert.equal(nodes["live-recording"].children[1].children.length, 3);
   assert.deepEqual(requested, []);
-  nodes["live-recording"].value = "private/3";
+  nodes["live-recording"].value = "real-call-3";
   await nodes["live-stream"].callbacks.click();
-  assert.deepEqual(requested, ["blob:test-call-3", "/api/live-session"]);
+  assert.deepEqual(requested, [audio, "/api/live-session"]);
   assert.equal(sent.deepgram.length, 1);
   assert.equal(clocks[0].delay, 20);
   clocks.shift().callback();
@@ -294,19 +285,14 @@ test("a selected real call streams fresh, identical 20 ms packets to both provid
   }
 });
 
-test("token endpoint is opt-in and can return partial availability without a passcode", async (t) => {
-  const original = {};
-  const values = {
-    LIVE_TEST_ENABLED: "0",
-    DEEPGRAM_API_KEY: "example-deepgram-secret",
-    GOOGLE_API_KEY: "example-google-secret",
-  };
-  for (const [key, value] of Object.entries(values)) {
-    original[key] = process.env[key];
-    process.env[key] = value;
+test("token endpoint works with one configured provider and reports an upstream failure", async (t) => {
+  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "LIVE_TEST_ENABLED"];
+  const original = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) {
+    delete process.env[key];
   }
   t.after(() => {
-    for (const [key, value] of Object.entries(original)) {
+    for (const [key, value] of original) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
@@ -326,11 +312,19 @@ test("token endpoint is opt-in and can return partial availability without a pas
   const disabled = makeResponse();
   await liveSession({ method: "POST" }, disabled);
   assert.equal(disabled.code, 503);
-  process.env.LIVE_TEST_ENABLED = "1";
+  assert.match(disabled.body.error, /DEEPGRAM_API_KEY or GOOGLE_API_KEY/);
+  process.env.GOOGLE_API_KEY = "example-google-secret";
   const crossSite = makeResponse();
   await liveSession({ method: "POST", headers: { "sec-fetch-site": "cross-site" } }, crossSite);
   assert.equal(crossSite.code, 403);
   assert.equal(fetch.mock.callCount(), 0);
+  const onlyGemini = makeResponse();
+  await liveSession({ method: "POST" }, onlyGemini);
+  assert.equal(onlyGemini.code, 200);
+  assert.deepEqual(onlyGemini.body.tokens, { gemini: "auth_tokens/test-only" });
+  assert.match(onlyGemini.body.errors.deepgram, /Set DEEPGRAM_API_KEY/);
+  assert.equal(fetch.mock.callCount(), 1);
+  process.env.DEEPGRAM_API_KEY = "example-deepgram-secret";
   const granted = makeResponse();
   await liveSession({ method: "POST", headers: { "sec-fetch-site": "same-origin" } }, granted);
   assert.equal(granted.code, 200);
