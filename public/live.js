@@ -10,6 +10,7 @@
     gemini: { name: "Google", model: "Gemini 3.8 Live" },
     openai: { name: "OpenAI", model: "GPT Live Transcribe" },
     groq: { name: "Groq", model: "Whisper Large v3" },
+    azure: { name: "Microsoft", model: "Azure Speech" },
   };
   const durationLimit = 120;
   const sampleRate = 16000;
@@ -59,7 +60,7 @@
   const states = {};
   for (const [provider, { name, model }] of Object.entries(providers)) {
     const panel = make("article", null, `transcript ${provider}`);
-    panel.hidden = provider === "groq";
+    panel.hidden = provider === "groq" || provider === "azure";
     const header = make("header");
     const title = make("div");
     title.append(make("p", name, "provider"), make("h3", model));
@@ -208,7 +209,7 @@
       if (run.llmEnabled) pipeline.pending.push(part);
     }
     if (!pipeline.pending.length || pipeline.active) return;
-    if (run.stopping || message.speech_final || provider === "openai" || provider === "groq") {
+    if (run.stopping || message.speech_final || provider === "openai" || provider === "groq" || provider === "azure") {
       void requestCleanup(run, provider);
     } else if (pipeline.timer === undefined) {
       pipeline.timer = setTimeout(() => void requestCleanup(run, provider), 180);
@@ -283,7 +284,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file", "live-llm", "live-groq"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-llm", "live-groq", "live-azure"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -314,6 +315,9 @@
     }
     if (run.groq?.enabled && !run.failed.has("groq")) {
       states.groq.status.textContent = run.events.groq.length ? "Complete" : "No text";
+    }
+    if (run.azure && !run.failed.has("azure")) {
+      states.azure.status.textContent = core.observe(run.events.azure, Infinity).first === null ? "No text" : "Complete";
     }
     for (const { status } of Object.values(states)) {
       if (status.textContent === "Connecting") status.textContent = "Unavailable";
@@ -381,6 +385,28 @@
     }
   }
 
+  async function connectAzure(run, session, preparation) {
+    const fail = (message) => {
+      if (current !== run) return;
+      run.failed.add("azure");
+      states.azure.status.textContent = message;
+    };
+    try {
+      if (preparation.error) throw preparation.error;
+      run.azure = await window.LiveAzure.connect(preparation.sdk, session, {
+        signal: run.controller.signal,
+        onError: fail,
+        onText(text, final) {
+          if (current !== run || run.started === null || run.sealed.has("azure")) return;
+          receiveTranscripts(run, "azure", [[(performance.now() - run.started) / 1000, text, final]]);
+        },
+      });
+      if (current === run && run.azure.active) states.azure.status.textContent = "Streaming · Sinhala";
+    } catch (error) {
+      fail(error.message);
+    }
+  }
+
   function sendFrame(run, bytes) {
     if (run !== current || !bytes.byteLength) return;
     if (run.started === null) run.started = performance.now();
@@ -388,6 +414,13 @@
     if (run.groq?.enabled) {
       bufferGroqFrame(run, bytes);
       sent++;
+    }
+    if (run.azure?.active && !run.failed.has("azure")) {
+      try { run.azure.write(bytes); sent++; }
+      catch {
+        run.failed.add("azure");
+        states.azure.status.textContent = "Could not send audio to Azure";
+      }
     }
     for (const [provider, socket] of Object.entries(run.sockets)) {
       if (!run.ready.has(provider) || socket.readyState !== WebSocket.OPEN) continue;
@@ -468,7 +501,7 @@
         if (current === run && !run.stopping && !run.failed.has(provider)) {
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
-          if (run.started !== null && !run.groq?.enabled && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
+          if (run.started !== null && !run.groq?.enabled && !run.azure?.active && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
             stop("All live streams disconnected.");
           }
         }
@@ -551,6 +584,17 @@
         seal(provider);
       }
     }
+    if (run.azure) {
+      const drained = new Promise((resolve) => { run.drains.azure = resolve; });
+      drains.push(drained.then((completed) => {
+        if (current === run && completed === undefined && !run.failed.has("azure")) {
+          run.failed.add("azure");
+          states.azure.status.textContent = "Azure finalization timed out";
+        }
+        seal("azure");
+      }));
+      run.azure.end().then(run.drains.azure);
+    }
     if (drains.length) {
       const deadline = setTimeout(() => {
         for (const resolve of Object.values(run.drains)) resolve();
@@ -585,11 +629,13 @@
       pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
       cleanupRequests: new Map(),
       groq: get("live-groq").checked ? { buffer: new Uint8Array(groqChunkBytes), length: 0, tail: Promise.resolve() } : null,
+      wantsAzure: get("live-azure").checked,
     };
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
     get("live-progress").hidden = true;
     states.groq.panel.hidden = !run.groq;
+    states.azure.panel.hidden = !run.wantsAzure;
     setBusy(true);
     get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
@@ -599,6 +645,7 @@
     try {
       const context = mode === "recording" ? new AudioContext() : new AudioContext({ sampleRate });
       run.context = context;
+      const azurePreparation = run.wantsAzure ? window.LiveAzure.prepare().then((sdk) => ({ sdk }), (error) => ({ error })) : null;
       await context.resume();
       if (current !== run) return;
       let buffer;
@@ -623,8 +670,12 @@
       }
       if (current !== run) return;
       get("live-status").textContent = "Opening provider streams…";
-      const groqRequest = run.groq ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groq: true }) } : {};
-      const response = await fetch("/api/live-session", { method: "POST", signal: run.controller.signal, cache: "no-store", ...groqRequest });
+      const options = { method: "POST", signal: run.controller.signal, cache: "no-store" };
+      if (run.groq || run.wantsAzure) {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = JSON.stringify({ ...(run.groq && { groq: true }), ...(run.wantsAzure && { azure: true }) });
+      }
+      const response = await fetch("/api/live-session", options);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok && !payload.errors) {
         throw new Error(payload.error || "Live testing requires the configured Vercel API endpoint.");
@@ -638,12 +689,15 @@
         states.groq.status.textContent = "Chunked · 4 s";
       }
       const setup = { gemini: payload.geminiSetup, openai: payload.openaiSetup };
-      await Promise.all(Object.entries(payload.tokens || {}).map(([provider, token]) =>
-        connect(run, provider, token, setup[provider])
-      ));
+      const preparedAzure = run.wantsAzure && payload.azureSession ? await azurePreparation : null;
+      if (current !== run) return;
+      const connections = Object.entries(payload.tokens || {}).map(([provider, token]) => connect(run, provider, token, setup[provider]));
+      if (preparedAzure) connections.push(connectAzure(run, payload.azureSession, preparedAzure));
+      await Promise.all(connections);
       if (current !== run) return;
       const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
       if (run.groq?.enabled) activeProviders.push("groq");
+      if (run.azure?.active) activeProviders.push("azure");
       if (!activeProviders.length) throw new Error("No live provider connected. See the provider status below.");
       const destination = new Intl.ListFormat("en").format(activeProviders.map((provider) => providers[provider].model));
       get("live-status").textContent = mode === "mic"

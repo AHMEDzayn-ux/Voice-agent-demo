@@ -1,6 +1,6 @@
 # Sinhala STT for live calls
 
-A benchmark demo for Sinhala call-center speech recognition. Live test compares Deepgram Nova‑3, Gemini 3.8 Live, and OpenAI GPT Live Transcribe.
+A benchmark demo for Sinhala call-center speech recognition. Live test compares Deepgram Nova‑3, Gemini 3.8 Live, OpenAI GPT Live Transcribe, and optional Azure Speech and Groq Whisper.
 
 ## Present the demo
 
@@ -23,12 +23,15 @@ Set the server-side environment variables for the providers you want to test in 
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
 - `OPENAI_API_KEY` — an OpenAI API project key with access to `gpt-live-transcribe`. [Create an API key](https://platform.openai.com/api-keys) and check [API billing](https://platform.openai.com/settings/organization/billing/overview).
 - `GROQ_API_KEY` — enables Groq Whisper and makes Qwen 3.8 27B the cleanup model. [Create a Groq API key](https://console.groq.com/keys).
+- `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` — the key and region code from **Keys and Endpoint** on your Azure Speech resource. Choose the **Free F0** tier for a small pilot if available. [Create a Speech resource](https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices) and see the [Microsoft setup guide](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/get-started-speech-to-text).
 
 Open **Live test** and choose **Start mic** or select a simulated recording and choose **Play & stream**. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser streams the same mono audio to each connected provider in 20 ms packets. Deepgram and Gemini receive 16 kHz audio. OpenAI receives the same signal resampled to 24 kHz and detects the language automatically. The browser commits OpenAI turns after an estimated 400 ms speech pause or every 10 seconds of uninterrupted audio, which can affect first-final latency. Each provider panel shows the playback position when its latest text arrived and flags text that came in after playback.
 
 Sessions last up to two minutes. Vercel issues short-lived client tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
 Enable **Include Groq Whisper** to send the same live audio in four-second chunks to `whisper-large-v3`. Its arrival time includes the wait to collect each chunk. The panel reports the Groq STT API time separately. [Groq speech-to-text API](https://console.groq.com/docs/speech-to-text).
+
+Enable **Include Azure Speech** for continuous native streaming in Sinhala (`si-LK`). The Speech SDK receives the same 16 kHz mono packets as Deepgram and Gemini, with Azure segmentation set to 400 ms of silence. The same playback clock and cleanup measurements apply. The Azure resource key remains server-side. [Azure Speech language support](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=stt).
 
 ### Measure live cleanup
 

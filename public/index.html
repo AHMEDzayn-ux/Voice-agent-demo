@@ -10,6 +10,7 @@
   <script src="assets/demo-data.js" defer></script>
   <script src="demo-core.js" defer></script>
   <script src="live-wire.js" defer></script>
+  <script src="live-azure.js" defer></script>
   <script src="app.js" defer></script>
   <script src="live.js" defer></script>
 </head>
@@ -78,6 +79,7 @@
           <option value="llm">LLM cleanup</option>
         </select></label>
         <label><input id="live-llm" type="checkbox"> Run LLM cleanup as STT finalizes</label>
+        <label><input id="live-azure" type="checkbox"> Include Azure Speech</label>
         <label><input id="live-groq" type="checkbox"> Include Groq Whisper (4 s chunks)</label>
         <span>Totals start at the first audio packet.</span>
       </div>

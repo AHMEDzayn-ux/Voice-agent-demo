@@ -55,7 +55,7 @@ function initDashboard(initialHash = "", runtime = {}) {
   };
   browser.window = browser;
   const sandbox = vm.createContext(browser);
-  for (const file of ["assets/demo-data.js", "demo-core.js", "live-wire.js", "app.js", "live.js"]) {
+  for (const file of ["assets/demo-data.js", "demo-core.js", "live-wire.js", "live-azure.js", "app.js", "live.js"]) {
     vm.runInContext(load(file), sandbox, { filename: file });
   }
   return { nodes, data: browser.DEMO_DATA, browser };
@@ -227,8 +227,8 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("recording streams to four providers and shares identical cleanup while it plays", async () => {
-  const sent = { deepgram: [], gemini: [], openai: [] };
+test("recording streams to Azure and the other providers and shares identical cleanup while it plays", async () => {
+  const sent = { deepgram: [], gemini: [], openai: [], azure: [] };
   const final = "\u0dc3\u0dd2 fiber package 2048";
   const clocks = [];
   let tick;
@@ -236,6 +236,8 @@ test("recording streams to four providers and shares identical cleanup while it 
   let wallTime = 123;
   let playing = false;
   let contextClosed = false;
+  let azureClosed = false;
+  let azureRecognizer;
   const destination = {};
   const playback = {
     connect(output) { assert.equal(output, destination); },
@@ -324,10 +326,41 @@ test("recording streams to four providers and shares identical cleanup while it 
       };
     }
   }
+  const SpeechSDK = {
+    PropertyId: { Speech_SegmentationSilenceTimeoutMs: 1 },
+    ResultReason: { RecognizedSpeech: 3 },
+    SpeechConfig: { fromAuthorizationToken(token, region) {
+      assert.equal(token, "azure-session-fixture");
+      assert.equal(region, "southeastasia");
+      return { setProperty(id, value) { assert.deepEqual([id, value], [1, "400"]); } };
+    } },
+    AudioStreamFormat: { getWaveFormatPCM(...format) { assert.deepEqual(format, [16000, 16, 1]); return format; } },
+    AudioConfig: { fromStreamInput: (input) => input },
+    AudioInputStream: { createPushStream() {
+      return {
+        write(bytes) {
+          assert.ok(playing);
+          sent.azure.push(Buffer.from(bytes));
+          if (sent.azure.length === 1) azureRecognizer.recognizing(null, { result: { text: "\u0dc3" } });
+        },
+        close() {
+          queueMicrotask(() => {
+            azureRecognizer.recognized(null, { result: { text: final, reason: 3 } });
+            azureRecognizer.sessionStopped();
+          });
+        },
+      };
+    } },
+    SpeechRecognizer: class {
+      constructor(config) { assert.equal(config.speechRecognitionLanguage, "si-LK"); azureRecognizer = this; }
+      startContinuousRecognitionAsync() { queueMicrotask(() => this.sessionStarted()); }
+      close() { azureClosed = true; }
+    },
+  };
   const requested = [];
   const audio = "assets/pause-fan_noise_10db.wav";
   const { nodes } = initDashboard("#live", {
-    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController,
+    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController, SpeechSDK,
     performance: { now: () => wallTime },
     async fetch(url, options) {
       requested.push(url);
@@ -342,12 +375,13 @@ test("recording streams to four providers and shares identical cleanup while it 
       }
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
-      assert.deepEqual(JSON.parse(options.body), { groq: true });
+      assert.deepEqual(JSON.parse(options.body), { groq: true, azure: true });
       return { ok: true, json: async () => ({
         tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test", openai: "ek_test" },
         geminiSetup: { model: "models/gemini-3.8-live" },
         openaiSetup: { type: "transcription" },
         groqEnabled: true,
+        azureSession: { token: "azure-session-fixture", region: "southeastasia" },
       }) };
     },
     setInterval(callback) { tick = callback; return 0; },
@@ -362,6 +396,7 @@ test("recording streams to four providers and shares identical cleanup while it 
   assert.deepEqual(requested, []);
   nodes["live-llm"].checked = true;
   nodes["live-groq"].checked = true;
+  nodes["live-azure"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
@@ -370,7 +405,7 @@ test("recording streams to four providers and shares identical cleanup while it 
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
   assert.equal(nodes["live-progress"].hidden, false);
   assert.equal(nodes["live-progress"].max, 0.04);
-  for (const panel of nodes["live-feeds"].children.slice(0, 3)) {
+  for (const panel of nodes["live-feeds"].children.filter((entry) => !entry.className.endsWith("groq"))) {
     assert.equal(panel.children[2].children[0].textContent, "\u0dc3");
     assert.equal(panel.children[3].textContent, "Interim received at recording 0:00.0");
   }
@@ -382,6 +417,7 @@ test("recording streams to four providers and shares identical cleanup while it 
   clocks.shift().callback();
   assert.equal(sent.deepgram.length, 2);
   assert.deepEqual(sent.deepgram, sent.gemini);
+  assert.deepEqual(sent.deepgram, sent.azure);
   assert.equal(sent.deepgram[0].byteLength, 640);
   assert.equal(sent.openai.length, 2);
   assert.equal(sent.openai[0].byteLength, 960);
@@ -394,12 +430,14 @@ test("recording streams to four providers and shares identical cleanup while it 
   assert.equal(sent.openai[2].byteLength, 2880);
   assert.equal(nodes["live-progress"].value, 0.04);
   assert.equal(contextClosed, false);
-  await Promise.resolve();
+  await new Promise(setImmediate);
+  assert.equal(azureClosed, true);
   assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
   wallTime += 5000;
   clocks.shift().callback();
   await new Promise(setImmediate);
   assert.equal(contextClosed, true);
+  assert.equal(azureClosed, true);
   assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
   assert.equal(requested.filter((url) => url === "/api/groq-transcribe").length, 1);
   assert.match(nodes["live-status"].textContent, /complete/i);
@@ -503,8 +541,8 @@ test("Groq STT validates the chunk and wraps its PCM without changing samples", 
   assert.equal(valid.body.text, "\u0dc3\u0dd2");
 });
 
-test("token endpoint works with one configured provider and mints an ephemeral OpenAI token", async (t) => {
-  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "LIVE_TEST_ENABLED"];
+test("session endpoint issues only the client tokens for the requested Azure and configured realtime providers", async (t) => {
+  const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION", "LIVE_TEST_ENABLED"];
   const original = new Map(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) {
     delete process.env[key];
@@ -517,6 +555,11 @@ test("token endpoint works with one configured provider and mints an ephemeral O
   });
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url.includes("deepgram")) return { ok: false, status: 403 };
+    if (url.endsWith("/issueToken")) {
+      assert.equal(url, "https://southeastasia.api.cognitive.microsoft.com/sts/v1.0/issueToken");
+      assert.equal(options.headers["Ocp-Apim-Subscription-Key"], "example-azure-secret");
+      return { ok: true, text: async () => "azure-token-test" };
+    }
     const setup = JSON.parse(options.body);
     if (url.startsWith("https://api.openai.com/")) {
       assert.equal(url, "https://api.openai.com/v1/realtime/client_secrets");
@@ -566,6 +609,22 @@ test("token endpoint works with one configured provider and mints an ephemeral O
   assert.equal(granted.headers["Cache-Control"], "no-store");
   assert.deepEqual(granted.body.tokens, { gemini: "auth_tokens/test-only", openai: "ek_test" });
   assert.match(granted.body.errors.deepgram, /403/);
+  process.env.AZURE_SPEECH_KEY = "example-azure-secret";
+  process.env.AZURE_SPEECH_REGION = "bad.host";
+  const invalidAzure = makeResponse();
+  await liveSession({ method: "POST", body: { azure: true } }, invalidAzure);
+  assert.equal(invalidAzure.code, 200);
+  assert.match(invalidAzure.body.errors.azure, /AZURE_SPEECH_REGION/);
+  delete process.env.DEEPGRAM_API_KEY;
+  delete process.env.GOOGLE_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  process.env.AZURE_SPEECH_REGION = "SoutheastAsia";
+  const withAzure = makeResponse();
+  await liveSession({ method: "POST", body: { azure: true } }, withAzure);
+  assert.equal(withAzure.code, 200);
+  assert.deepEqual(withAzure.body.tokens, {});
+  assert.deepEqual(withAzure.body.azureSession, { token: "azure-token-test", region: "southeastasia" });
+  assert.doesNotMatch(JSON.stringify(withAzure.body), /example-.*secret/);
   assert.doesNotMatch(JSON.stringify(granted.body), /example-.*secret/);
 });
 
