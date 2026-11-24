@@ -9,14 +9,14 @@
   const sampleRate = 16000;
   const recordingSelect = get("live-recording");
   const localFileId = "local-file";
-  const realRecordings = [1, 2, 3].map((number) => ({
-    id: `real-call-${number}`, label: `Real call ${number}`,
-    audio: `assets/real-calls/real_call_0${number}.mp3`,
-  }));
-  const demoRecordings = (window.DEMO_DATA?.clips || []).map(({ id, scenarioLabel, label, audio }) => ({
-    id, label: `${scenarioLabel} · ${label}`, audio,
-  }));
-  const recordings = new Map([...realRecordings, ...demoRecordings].map((recording) => [recording.id, recording]));
+  const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenarioLabel, label, audio }) => {
+    const clip = { id, label: `${scenarioLabel} · ${label}`, audio };
+    if (id !== "pause_and_talk/clean") return [clip];
+    return [clip,
+      { id: "pause_and_talk/fan_noise_10db", label: `${scenarioLabel} · Fan noise (10 dB SNR)`, audio: "assets/pause-fan_noise_10db.wav" },
+      { id: "pause_and_talk/office_noise_10db", label: `${scenarioLabel} · Office noise (10 dB SNR)`, audio: "assets/pause-office_noise_10db.wav" },
+    ];
+  });
   let localFile = null;
   let current = null;
   let lastRun = null;
@@ -31,8 +31,7 @@
   function refreshRecordings(selected = recordingSelect.value) {
     recordingSelect.replaceChildren();
     const groups = [
-      ["Real calls", realRecordings],
-      ["Simulated recordings", demoRecordings],
+      ["Simulated recordings", recordings],
       ["On this device", localFile ? [{ id: localFileId, label: localFile.name }] : []],
     ];
     for (const [label, items] of groups) {
@@ -46,7 +45,8 @@
       }
       recordingSelect.append(group);
     }
-    recordingSelect.value = selected || realRecordings[0].id;
+    recordingSelect.value = selected || recordings[0]?.id || "";
+    get("live-stream").disabled = !recordingSelect.value;
   }
 
   const states = {};
@@ -264,7 +264,7 @@
     if (current) return;
     const selected = recordingSelect.value;
     const file = selected === localFileId ? localFile : null;
-    const clip = recordings.get(selected);
+    const clip = recordings.find((recording) => recording.id === selected);
     if (mode === "recording" && !file && !clip) {
       return get("live-status").textContent = "Choose a recording to stream.";
     }

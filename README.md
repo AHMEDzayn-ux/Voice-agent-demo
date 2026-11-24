@@ -22,7 +22,9 @@ Set one or both of these server-side environment variables in the Vercel project
 - `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
 
-Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The picker includes three original call recordings and six simulated recordings. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser sends the audio directly to each connected provider at normal speed in identical 20 ms packets of 16 kHz mono audio. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
+Open **Live test** and choose **Start mic** or select a simulated recording and choose **Stream recording**. Use **Choose another audio file** to select a different file from your device. The recording plays as the browser sends the audio directly to each connected provider at normal speed in identical 20 ms packets of 16 kHz mono audio. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
+
+Compare **Pauses and restarts · Clean recording** with its fan and office variants. Each mix uses the same speech and timing. The added noise level gives a 10 dB signal-to-noise ratio over speech intervals estimated with Silero VAD. The fan and office source recordings are CC0. [Computer Fan Loop by Ezcah](https://freesound.org/people/Ezcah/sounds/242042/) and [Office Ambience by DiArchangeli](https://freesound.org/people/DiArchangeli/sounds/108695/).
 
 ## Preview and test
 
@@ -38,4 +40,4 @@ Open [localhost:8080](http://localhost:8080). Run the dependency-free checks wit
 node --test
 ```
 
-The Streams replay contains simulated audio and captured outputs. Benchmarks includes anonymized numerical measurements for the three calls in the Live test picker. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.
+The Streams replay contains simulated audio and captured outputs. Benchmarks includes anonymized numerical measurements for three real calls from the pilot. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.

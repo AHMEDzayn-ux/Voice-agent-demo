@@ -139,16 +139,19 @@ test("live view offers bundled recordings and can select a local file without st
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
   const recordings = nodes["live-recording"];
-  assert.equal(recordings.children[0].label, "Real calls");
-  assert.deepEqual(recordings.children[0].children.map((option) => option.textContent), ["Real call 1", "Real call 2", "Real call 3"]);
-  for (const index of [1, 2, 3]) assert.ok(fs.statSync(path.join(site, `assets/real-calls/real_call_0${index}.mp3`)).size > 0);
-  assert.equal(recordings.children[1].children.length, 6);
-  assert.equal(recordings.value, "real-call-1");
+  assert.equal(recordings.children.length, 1);
+  assert.equal(recordings.children[0].label, "Simulated recordings");
+  assert.equal(recordings.children[0].children.length, 8);
+  assert.equal(recordings.value, "pause_and_talk/clean");
+  for (const condition of ["fan", "office"]) {
+    assert.ok(recordings.children[0].children.some((option) => option.value === `pause_and_talk/${condition}_noise_10db`));
+    assert.ok(fs.statSync(path.join(site, `assets/pause-${condition}_noise_10db.wav`)).size > 0);
+  }
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
   input.callbacks.change({ target: input });
   assert.equal(recordings.value, "local-file");
-  assert.equal(recordings.children[2].children[0].textContent, "sample.mp3");
+  assert.equal(recordings.children[1].children[0].textContent, "sample.mp3");
   assert.match(nodes["live-status"].textContent, /ready/);
   nodes["tab-replay"].callbacks.click();
   assert.equal(nodes["replay-console"].hidden, false);
@@ -191,7 +194,7 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("a selected real call plays while identical 20 ms packets stream to both providers", async () => {
+test("a noisy recording plays while identical 20 ms packets stream to both providers", async () => {
   const sent = { deepgram: [], gemini: [] };
   const clocks = [];
   let playing = false;
@@ -258,7 +261,7 @@ test("a selected real call plays while identical 20 ms packets stream to both pr
     }
   }
   const requested = [];
-  const audio = "assets/real-calls/real_call_03.mp3";
+  const audio = "assets/pause-fan_noise_10db.wav";
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
     async fetch(url, options) {
@@ -281,7 +284,7 @@ test("a selected real call plays while identical 20 ms packets stream to both pr
     clearTimeout() {},
   });
   assert.deepEqual(requested, []);
-  nodes["live-recording"].value = "real-call-3";
+  nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
   assert.equal(playback.buffer.length, 640);
