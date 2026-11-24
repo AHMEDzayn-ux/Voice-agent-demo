@@ -21,9 +21,9 @@ Set these server-side environment variables in the Vercel project, then redeploy
 
 - `DEEPGRAM_API_KEY` — a key with at least Member permissions so it can mint temporary tokens.
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
-- `LIVE_TEST_PASSCODE` — a private, randomly generated passcode of at least 16 characters. Give it only to people authorized to run billable tests.
+- `LIVE_TEST_ENABLED` — set to `1` to let visitors start live sessions. You can delete the old `LIVE_TEST_PASSCODE` variable.
 
-Open **Live test**, enter the passcode, and start the mic or stream an audio file up to two minutes. The browser sends the same 16 kHz mono packets directly to each ready provider. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Deployed test sessions use your providers' quotas and billing.
+Open **Live test** and start the mic or stream an audio file up to two minutes. The browser sends the same 16 kHz mono packets directly to each ready provider. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. When live testing is enabled, anyone who can access the deployment can run tests using your provider quotas.
 
 ## Preview and test
 

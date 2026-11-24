@@ -63,7 +63,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-upload", "live-passcode", "live-file"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-upload", "live-file"]) get(id).disabled = busy;
     get("live-stop").disabled = !busy;
   }
 
@@ -212,9 +212,7 @@
 
   async function start(mode) {
     if (current) return;
-    const passcode = get("live-passcode").value;
     const file = get("live-file").files?.[0];
-    if (!passcode) return get("live-status").textContent = "Enter the live-demo passcode.";
     if (mode === "file" && (!file || file.size > 20000000)) {
       return get("live-status").textContent = "Choose an audio file under 20 MB.";
     }
@@ -252,8 +250,7 @@
       if (current !== run) return;
       get("live-status").textContent = "Opening both provider streams…";
       const response = await fetch("/api/live-session", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode }), signal: run.controller.signal, cache: "no-store",
+        method: "POST", signal: run.controller.signal, cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok && !payload.errors) {

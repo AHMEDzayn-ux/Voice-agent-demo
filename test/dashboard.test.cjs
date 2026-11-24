@@ -130,14 +130,13 @@ test("local replay pack imports without adding any provider request", async () =
   assert.match(nodes["player-status"].textContent, /invalid audio/);
 });
 
-test("live view has separate controls and does not open a session without a passcode", () => {
+test("live view has separate controls and no passcode field", () => {
   const { nodes } = initDashboard();
   nodes["tab-live"].callbacks.click();
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
   assert.equal(nodes["live-feeds"].children.length, 2);
-  nodes["live-mic"].callbacks.click();
-  assert.match(nodes["live-status"].textContent, /passcode/);
+  assert.equal(nodes["live-passcode"], undefined);
   nodes["tab-replay"].callbacks.click();
   assert.equal(nodes["replay-console"].hidden, false);
 });
@@ -232,10 +231,15 @@ test("file test opens both streams, fans out identical audio, and finishes both 
   }
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
-    fetch: async () => ({ ok: true, json: async () => ({
-      tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test" },
-      geminiSetup: { model: "models/gemini-3.8-live" },
-    }) }),
+    async fetch(url, options) {
+      assert.equal(url, "/api/live-session");
+      assert.equal(options.method, "POST");
+      assert.equal(options.body, undefined);
+      return { ok: true, json: async () => ({
+        tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test" },
+        geminiSetup: { model: "models/gemini-3.8-live" },
+      }) };
+    },
     setInterval: () => 0, clearInterval() {},
     setTimeout(callback, delay) {
       if (delay >= 8000) return 0;
@@ -244,7 +248,6 @@ test("file test opens both streams, fans out identical audio, and finishes both 
     },
     clearTimeout() {},
   });
-  nodes["live-passcode"].value = "test-fixture-passcode";
   nodes["live-file"].files = [{ size: 10, arrayBuffer: async () => new ArrayBuffer(10) }];
   await nodes["live-upload"].callbacks.click();
   assert.equal(sent.deepgram.length, 1);
@@ -260,10 +263,10 @@ test("file test opens both streams, fans out identical audio, and finishes both 
   }
 });
 
-test("token endpoint requires the private passcode and can return partial availability", async (t) => {
+test("token endpoint is opt-in and can return partial availability without a passcode", async (t) => {
   const original = {};
   const values = {
-    LIVE_TEST_PASSCODE: "example-fixture-passcode",
+    LIVE_TEST_ENABLED: "0",
     DEEPGRAM_API_KEY: "example-deepgram-secret",
     GOOGLE_API_KEY: "example-google-secret",
   };
@@ -289,12 +292,16 @@ test("token endpoint requires the private passcode and can return partial availa
     status(code) { this.code = code; return this; },
     json(body) { this.body = body; },
   });
-  const refused = makeResponse();
-  await liveSession({ method: "POST", body: { passcode: "wrong" } }, refused);
-  assert.equal(refused.code, 403);
+  const disabled = makeResponse();
+  await liveSession({ method: "POST" }, disabled);
+  assert.equal(disabled.code, 503);
+  process.env.LIVE_TEST_ENABLED = "1";
+  const crossSite = makeResponse();
+  await liveSession({ method: "POST", headers: { "sec-fetch-site": "cross-site" } }, crossSite);
+  assert.equal(crossSite.code, 403);
   assert.equal(fetch.mock.callCount(), 0);
   const granted = makeResponse();
-  await liveSession({ method: "POST", body: { passcode: values.LIVE_TEST_PASSCODE } }, granted);
+  await liveSession({ method: "POST", headers: { "sec-fetch-site": "same-origin" } }, granted);
   assert.equal(granted.code, 200);
   assert.equal(granted.headers["Cache-Control"], "no-store");
   assert.deepEqual(granted.body.tokens, { gemini: "auth_tokens/test-only" });

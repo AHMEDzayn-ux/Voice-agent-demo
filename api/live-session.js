@@ -1,8 +1,5 @@
 "use strict";
 
-const { createHash, timingSafeEqual } = require("node:crypto");
-
-const digest = (value) => createHash("sha256").update(value).digest();
 const geminiSetup = {
   model: "models/gemini-3.8-live",
   generationConfig: { responseModalities: ["AUDIO"] },
@@ -56,16 +53,13 @@ module.exports = async function liveSession(request, response) {
     response.setHeader("Allow", "POST");
     return response.status(405).json({ error: "Use POST." });
   }
-  const passcode = process.env.LIVE_TEST_PASSCODE;
+  if (request.headers?.["sec-fetch-site"] === "cross-site") {
+    return response.status(403).json({ error: "Start the live test from the demo page." });
+  }
   const deepgramKey = process.env.DEEPGRAM_API_KEY;
   const geminiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-  if (!passcode || passcode.length < 16 || !deepgramKey || !geminiKey) {
-    return response.status(503).json({ error: "Live testing is disabled. Configure both provider keys and a demo passcode." });
-  }
-  const supplied = request.body?.passcode;
-  if (typeof supplied !== "string" || supplied.length > 256 ||
-      !timingSafeEqual(digest(supplied), digest(passcode))) {
-    return response.status(403).json({ error: "The live-demo passcode is incorrect." });
+  if (process.env.LIVE_TEST_ENABLED !== "1" || !deepgramKey || !geminiKey) {
+    return response.status(503).json({ error: "Live testing is disabled. Set LIVE_TEST_ENABLED=1 and configure both provider keys in Vercel." });
   }
   const result = await mintTokens(deepgramKey, geminiKey);
   return response.status(Object.keys(result.tokens).length ? 200 : 502).json({ ...result, geminiSetup });

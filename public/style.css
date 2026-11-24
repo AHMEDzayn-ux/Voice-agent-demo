@@ -65,7 +65,7 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 .live-console { margin-bottom: 9px; }
 .live-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .live-header h2 { margin: 0 0 7px; font-size: 1.25rem; letter-spacing: -.035em; }
-.live-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.live-controls { max-width: 25rem; }
 .live-controls label { display: grid; min-width: 0; gap: 4px; color: #bacdc6; font-size: .875rem; }
 .live-controls input { width: 100%; min-width: 0; border: 1px solid #58736e; border-radius: 7px; background: #182d30; color: #f1f8f2; padding: 6px 8px; }
 .live-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 9px 6px; }
@@ -183,7 +183,6 @@ tr :first-child { text-align: left; }
 }
 @media (max-width: 410px) {
   .view-tabs button { font-size: .875rem; padding-inline: 3px; }
-  .live-controls { grid-template-columns: 1fr; }
   .feed-metrics dd { font-size: .94rem; }
   .metric { padding-inline: 8px; }
   .rollup { gap: 8px; padding-inline: 9px; }
