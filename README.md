@@ -23,7 +23,7 @@ Set these server-side environment variables in the Vercel project, then redeploy
 - `GOOGLE_API_KEY` or `GEMINI_API_KEY` — a Gemini Developer API key with Live access.
 - `LIVE_TEST_ENABLED` — set to `1` to let visitors start live sessions. You can delete the old `LIVE_TEST_PASSCODE` variable.
 
-Open **Live test** and start the mic or stream an audio file up to two minutes. The browser sends the same 16 kHz mono packets directly to each ready provider. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. When live testing is enabled, anyone who can access the deployment can run tests using your provider quotas.
+Open **Live test** and choose **Start mic** or select a recording and choose **Stream recording**. The demo clips are already in the picker. Use **Load real calls** to add the calls from `real-call-replay.private.json` in your current tab, or **Choose audio file** to add an individual file. Loading a local file does not send it to the providers. When you start the test, the browser sends identical 20 ms packets of 16 kHz mono audio directly to each connected provider at normal speed for fresh transcripts. Sessions last up to two minutes. Vercel only issues short-lived tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. When live testing is enabled, anyone who can access the deployment can run tests using your provider quotas.
 
 ## Preview and test
 

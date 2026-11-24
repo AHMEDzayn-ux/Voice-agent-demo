@@ -29,7 +29,7 @@ function initDashboard(initialHash = "", runtime = {}) {
   }
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);
-  const nodes = Object.fromEntries(ids.map((id) => [id, node()]));
+  const nodes = Object.fromEntries(ids.map((id) => [id, Object.assign(node(), { id })]));
   Object.assign(nodes.audio, {
     paused: true, currentTime: 0, duration: 28.224, ended: false,
     pause() { this.paused = true; },
@@ -121,6 +121,7 @@ test("local replay pack imports without adding any provider request", async () =
   assert.equal(data.clips.length, 7);
   assert.equal(nodes.scenario.value, "private/1");
   assert.equal(nodes.audio.src, "blob:test-call");
+  assert.equal(nodes["live-recording"].value, "private/1");
   nodes.results.callbacks.click();
   assert.equal(nodes["raw-output"].textContent, "private test");
   assert.equal(nodes["llm-output"].children[0].textContent, "Cleanup was unavailable for this stream.");
@@ -130,13 +131,22 @@ test("local replay pack imports without adding any provider request", async () =
   assert.match(nodes["player-status"].textContent, /invalid audio/);
 });
 
-test("live view has separate controls and no passcode field", () => {
+test("live view offers bundled recordings and can select a local file without starting a session", () => {
   const { nodes } = initDashboard();
   nodes["tab-live"].callbacks.click();
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
   assert.equal(nodes["live-feeds"].children.length, 2);
   assert.equal(nodes["live-passcode"], undefined);
+  const recordings = nodes["live-recording"];
+  assert.equal(recordings.children[0].children.length, 6);
+  assert.equal(recordings.value, "pause_and_talk/clean");
+  const input = nodes["live-file"];
+  input.files = [{ name: "sample.mp3", size: 10 }];
+  input.callbacks.change({ target: input });
+  assert.equal(recordings.value, "local-file");
+  assert.equal(recordings.children[1].children[0].textContent, "sample.mp3");
+  assert.match(nodes["live-status"].textContent, /ready/);
   nodes["tab-replay"].callbacks.click();
   assert.equal(nodes["replay-console"].hidden, false);
 });
@@ -178,7 +188,7 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("file test opens both streams, fans out identical audio, and finishes both transcripts", async () => {
+test("a selected real call streams fresh, identical 20 ms packets to both providers", async () => {
   const sent = { deepgram: [], gemini: [] };
   const clocks = [];
   class Socket extends EventTarget {
@@ -224,14 +234,21 @@ test("file test opens both streams, fans out identical audio, and finishes both 
     async close() { this.state = "closed"; }
     async decodeAudioData() {
       return {
-        length: 320, numberOfChannels: 1, duration: 0.02,
-        getChannelData: () => new Float32Array(320).fill(0.5),
+        length: 640, numberOfChannels: 1, duration: 0.04,
+        getChannelData: () => new Float32Array(640).fill(0.5),
       };
     }
   }
+  const requested = [];
+  let nextUrl = 0;
+  class TestURL extends URL {
+    static createObjectURL() { return `blob:test-call-${++nextUrl}`; }
+  }
   const { nodes } = initDashboard("#live", {
-    URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
+    URL: TestURL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, AbortController,
     async fetch(url, options) {
+      requested.push(url);
+      if (url === "blob:test-call-3") return { ok: true, arrayBuffer: async () => new ArrayBuffer(10) };
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
       assert.equal(options.body, undefined);
@@ -243,18 +260,32 @@ test("file test opens both streams, fans out identical audio, and finishes both 
     setInterval: () => 0, clearInterval() {},
     setTimeout(callback, delay) {
       if (delay >= 8000) return 0;
-      clocks.push(callback);
+      clocks.push({ callback, delay });
       return clocks.length;
     },
     clearTimeout() {},
   });
-  nodes["live-file"].files = [{ size: 10, arrayBuffer: async () => new ArrayBuffer(10) }];
-  await nodes["live-upload"].callbacks.click();
+  const input = nodes["live-load-real"];
+  const call = {
+    audioBase64: "YQ==", duration: 0.04, speechStart: 0, speechEnd: 0.04,
+    wave: Array(160).fill(0.3), events: { deepgram: [], gemini: [] },
+  };
+  input.files = [{ size: 30, text: async () => JSON.stringify({ version: 1, calls: [call, call, call] }) }];
+  await input.callbacks.change({ target: input });
+  assert.match(nodes["live-status"].textContent, /Loaded 3 real calls/);
+  assert.equal(nodes["live-recording"].children[1].children.length, 3);
+  assert.deepEqual(requested, []);
+  nodes["live-recording"].value = "private/3";
+  await nodes["live-stream"].callbacks.click();
+  assert.deepEqual(requested, ["blob:test-call-3", "/api/live-session"]);
   assert.equal(sent.deepgram.length, 1);
+  assert.equal(clocks[0].delay, 20);
+  clocks.shift().callback();
+  assert.equal(sent.deepgram.length, 2);
   assert.deepEqual(sent.deepgram, sent.gemini);
   assert.equal(sent.deepgram[0].byteLength, 640);
-  clocks.shift()();
-  clocks.shift()();
+  clocks.shift().callback();
+  clocks.shift().callback();
   await Promise.resolve();
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {

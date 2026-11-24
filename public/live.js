@@ -7,6 +7,9 @@
   const providerNames = { deepgram: "Nova-3", gemini: "Gemini 3.8 Live" };
   const durationLimit = 120;
   const sampleRate = 16000;
+  const recordingSelect = get("live-recording");
+  const localFileId = "local-file";
+  let localFile = null;
   let current = null;
   let lastRun = null;
 
@@ -16,6 +19,33 @@
     if (classes) element.className = classes;
     return element;
   };
+
+  function refreshRecordings(selected = recordingSelect.value) {
+    const demo = make("optgroup");
+    demo.label = "Demo recordings";
+    const device = make("optgroup");
+    device.label = "On this device";
+    const ids = [];
+    for (const clip of window.DEMO_DATA?.clips || []) {
+      const real = clip.id.startsWith("private/");
+      const option = make("option", real ? clip.scenarioLabel : `${clip.scenarioLabel} · ${clip.label}`);
+      option.value = clip.id;
+      ids.push(clip.id);
+      (real ? device : demo).append(option);
+    }
+    if (localFile) {
+      const option = make("option", localFile.name);
+      option.value = localFileId;
+      ids.push(localFileId);
+      device.append(option);
+    }
+    recordingSelect.replaceChildren();
+    if (demo.children.length) recordingSelect.append(demo);
+    if (device.children.length) recordingSelect.append(device);
+    recordingSelect.value = ids.includes(selected) ? selected : ids[0] || "";
+    get("live-stream").disabled = Boolean(current) || !ids.length;
+  }
+
   const states = {};
   for (const [provider, label] of Object.entries(providerNames)) {
     const panel = make("article", null, `transcript ${provider}`);
@@ -63,7 +93,8 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-upload", "live-file"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-load-real"]) get(id).disabled = busy;
+    get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
 
@@ -212,9 +243,11 @@
 
   async function start(mode) {
     if (current) return;
-    const file = get("live-file").files?.[0];
-    if (mode === "file" && (!file || file.size > 20000000)) {
-      return get("live-status").textContent = "Choose an audio file under 20 MB.";
+    const selected = recordingSelect.value;
+    const file = selected === localFileId ? localFile : null;
+    const clip = window.DEMO_DATA?.clips.find((entry) => entry.id === selected);
+    if (mode === "recording" && !file && !clip) {
+      return get("live-status").textContent = "Choose a recording to stream.";
     }
     if (mode === "mic" && !navigator.mediaDevices?.getUserMedia) {
       return get("live-status").textContent = "Microphone access requires HTTPS or localhost.";
@@ -226,7 +259,7 @@
     current = lastRun = run;
     get("live-clock").textContent = "0:00";
     setBusy(true);
-    get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the audio file…";
+    get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
       states[provider].status.textContent = "Connecting";
       render(run, provider);
@@ -238,9 +271,11 @@
       if (current !== run) return;
       if (context.sampleRate !== sampleRate) throw new Error("This browser cannot provide 16 kHz capture.");
       let buffer;
-      if (mode === "file") {
-        buffer = await context.decodeAudioData(await file.arrayBuffer());
-        if (buffer.duration > durationLimit) throw new Error("Choose a file no longer than two minutes.");
+      if (mode === "recording") {
+        const source = file || await fetch(clip.audio, { signal: run.controller.signal });
+        if (!file && !source.ok) throw new Error("Could not load the selected recording.");
+        buffer = await context.decodeAudioData(await source.arrayBuffer());
+        if (buffer.duration > durationLimit) throw new Error("Choose a recording no longer than two minutes.");
       } else {
         const media = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
         if (current !== run) return media.getTracks().forEach((track) => track.stop());
@@ -267,7 +302,7 @@
       if (!Object.values(run.sockets).some((socket) => socket.readyState === WebSocket.OPEN) || !run.ready.size) {
         throw new Error("Neither live provider connected. See the provider status below.");
       }
-      get("live-status").textContent = mode === "mic" ? "Listening to your microphone…" : "Streaming the uploaded file at 1×…";
+      get("live-status").textContent = mode === "mic" ? "Listening to your microphone…" : "Streaming the recording at 1×…";
       const waitingSince = performance.now();
       run.clock = setInterval(() => {
         if (run.started === null) {
@@ -278,7 +313,7 @@
         get("live-clock").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         if (seconds >= durationLimit) stop("Two-minute test complete.");
       }, 200);
-      if (mode === "file") fileFrames(run, buffer);
+      if (mode === "recording") fileFrames(run, buffer);
       else {
         const source = context.createMediaStreamSource(run.stream);
         const worklet = run.worklet = new AudioWorkletNode(context, "benchmark-pcm");
@@ -298,11 +333,24 @@
   }
 
   get("live-mic").addEventListener("click", () => start("mic"));
-  get("live-upload").addEventListener("click", () => start("file"));
+  get("live-stream").addEventListener("click", () => start("recording"));
+  get("live-file").addEventListener("change", ({ target }) => {
+    const file = target.files?.[0];
+    target.value = "";
+    if (!file) return;
+    if (file.size > 20000000) {
+      get("live-status").textContent = "Choose an audio file no larger than 20 MB.";
+      return;
+    }
+    localFile = file;
+    refreshRecordings(localFileId);
+    get("live-status").textContent = "Audio file ready. Select Stream recording to run the live test.";
+  });
   get("live-stop").addEventListener("click", () => stop());
   get("live-rules").addEventListener("change", () => {
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
   window.addEventListener("pagehide", () => { if (current) finish(current, "Test ended."); });
-  window.LiveBench = { stop };
+  window.LiveBench = { stop, refreshRecordings };
+  refreshRecordings();
 })();

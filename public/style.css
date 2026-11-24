@@ -65,9 +65,10 @@ h1 { margin: 0; font-size: clamp(1.3rem, 2.7vw, 1.95rem); line-height: 1.14; let
 .live-console { margin-bottom: 9px; }
 .live-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .live-header h2 { margin: 0 0 7px; font-size: 1.25rem; letter-spacing: -.035em; }
-.live-controls { max-width: 25rem; }
-.live-controls label { display: grid; min-width: 0; gap: 4px; color: #bacdc6; font-size: .875rem; }
-.live-controls input { width: 100%; min-width: 0; border: 1px solid #58736e; border-radius: 7px; background: #182d30; color: #f1f8f2; padding: 6px 8px; }
+.live-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
+.live-controls .clip-select { flex: 1 1 18rem; min-width: 0; max-width: 26rem; }
+.live-file-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.live-file-actions .file-action:has(input:disabled) { opacity: .45; cursor: default; pointer-events: none; }
 .live-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 9px 6px; }
 .live-actions button:disabled { opacity: .45; cursor: default; }
 .live-view-tools { display: flex; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; color: var(--muted); font-size: .875rem; margin-bottom: 7px; }

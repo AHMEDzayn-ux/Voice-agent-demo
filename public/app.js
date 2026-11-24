@@ -447,9 +447,10 @@ if (window.DEMO_DATA && core) {
   };
   scenarios.addEventListener("change", changeScenario);
   choices.addEventListener("change", () => chooseClip(choices.value));
-  el("load-real").addEventListener("change", async ({ target }) => {
+  const loadRealCalls = async ({ target }) => {
     const file = target.files?.[0];
     if (!file) return;
+    const status = el(target.id === "live-load-real" ? "live-status" : "player-status");
     const urls = [];
     try {
       if (file.size > 8000000) throw new Error("Choose a replay file under 8 MB.");
@@ -470,14 +471,16 @@ if (window.DEMO_DATA && core) {
       changeScenario();
       for (const url of privateAudioUrls) URL.revokeObjectURL(url);
       privateAudioUrls = urls;
-      el("player-status").textContent = `Loaded ${calls.length} real-call replays in this tab.`;
+      window.LiveBench?.refreshRecordings(calls[0].id);
+      status.textContent = `Loaded ${calls.length} real ${calls.length === 1 ? "call" : "calls"} in this tab.`;
     } catch (error) {
       for (const url of urls) URL.revokeObjectURL(url);
-      el("player-status").textContent = error instanceof SyntaxError ? "Choose a valid real-call replay file." : error.message;
+      status.textContent = error instanceof SyntaxError ? "Choose a valid real-call replay file." : error.message;
     } finally {
       target.value = "";
     }
-  });
+  };
+  for (const id of ["load-real", "live-load-real"]) el(id).addEventListener("change", loadRealCalls);
   el("cleanup-provider").addEventListener("change", () => updateLab(position(), true));
   el("reference").addEventListener("input", () => {
     references.set(clip.scenario, el("reference").value);
