@@ -253,9 +253,8 @@
   }
 
   const prices = Object.freeze({
-    novaPerMinute: 0.0048,
+    novaPerMinute: 0.0077,
     openaiPerMinute: 0.017,
-    novaPreviousPerMinute: 0.0077,
     geminiAudioInputPerMinute: 0.005,
     geminiAudioOutputPerMinute: 0.018,
     azurePerHour: 1,
@@ -281,7 +280,6 @@
     const cleanupCost = (inputRate, outputRate) => requests * (214 * inputRate + 143 * outputRate) / 1000000;
     return {
       nova: callerMinutes * prices.novaPerMinute,
-      novaPrevious: callerMinutes * prices.novaPreviousPerMinute,
       openai: callerMinutes * prices.openaiPerMinute,
       geminiInput: callerMinutes * prices.geminiAudioInputPerMinute,
       geminiOutput: replyMinutes * prices.geminiAudioOutputPerMinute,

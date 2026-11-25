@@ -156,7 +156,7 @@ test("price calculator uses published units and captured cleanup usage", () => {
     callerMinutes: 10000, callMinutes: 3, replyMinutesPer100: 30, cleanupsPerMinute: 6,
   };
   const result = core.estimateCosts(usage);
-  assert.equal(result.nova.toFixed(2), "48.00");
+  assert.equal(result.nova.toFixed(2), "77.00");
   assert.equal(result.openai.toFixed(2), "170.00");
   assert.equal(result.geminiInput.toFixed(2), "50.00");
   assert.equal(result.geminiOutput.toFixed(2), "54.00");
@@ -170,7 +170,7 @@ test("price calculator uses published units and captured cleanup usage", () => {
   assert.equal(core.estimateCosts({ ...usage, callerMinutes: 300 }).azureFree, true);
   assert.equal(core.estimateCosts({ ...usage, callMinutes: 0 }), null);
   const { nodes } = initDashboard();
-  assert.equal(nodes["cost-nova"].textContent, "$48.00");
+  assert.equal(nodes["cost-nova"].textContent, "$77.00");
   assert.equal(nodes["cost-gemini"].textContent, "$104.00");
   assert.equal(nodes["cost-openai"].textContent, "$170.00");
   assert.equal(nodes["cost-azure"].textContent, "$166.67");
@@ -179,6 +179,7 @@ test("price calculator uses published units and captured cleanup usage", () => {
   assert.equal(nodes["cost-qwen"].textContent, "$44.59");
   nodes.minutes.value = "20000";
   nodes.minutes.callbacks.input();
+  assert.equal(nodes["cost-nova"].textContent, "$154.00");
   assert.equal(nodes["cost-gemini"].textContent, "$208.00");
   assert.equal(nodes["cost-cleanup"].textContent, "$50.60");
   nodes["reply-minutes-per-100"].value = "0";

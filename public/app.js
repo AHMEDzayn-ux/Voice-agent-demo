@@ -476,7 +476,6 @@ function updateCost() {
   const count = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
   el("audio-hours").textContent = estimates ? `${count.format(usage.callerMinutes / 60)} hours of caller audio per month` : "";
   el("cost-nova").textContent = format(estimates?.nova);
-  el("cost-nova-previous").textContent = estimates ? `${format(estimates.novaPrevious)} at previous rate` : "";
   el("cost-gemini").textContent = format(estimates ? estimates.geminiInput + estimates.geminiOutput : undefined);
   el("cost-gemini-details").textContent = estimates
     ? `${format(estimates.geminiInput)} caller audio + ${format(estimates.geminiOutput)} for ${count.format(estimates.replyMinutes)} reply min`
