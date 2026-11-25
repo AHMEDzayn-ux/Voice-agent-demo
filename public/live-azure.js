@@ -33,6 +33,7 @@
     signal.throwIfAborted();
     const config = sdk.SpeechConfig.fromAuthorizationToken(token, region);
     config.speechRecognitionLanguage = "si-LK";
+    config.outputFormat = sdk.OutputFormat.Detailed;
     config.setProperty(sdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, "400");
     const stream = sdk.AudioInputStream.createPushStream(sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1));
     const recognizer = new sdk.SpeechRecognizer(config, sdk.AudioConfig.fromStreamInput(stream));
@@ -81,8 +82,12 @@
       };
       recognizer.recognized = (_, { result }) => {
         if (closed) return;
-        if (result.reason === sdk.ResultReason.RecognizedSpeech) onText(result.text || "", true);
-        else if (result.reason === sdk.ResultReason.NoMatch) onText("", true);
+        if (result.reason === sdk.ResultReason.RecognizedSpeech) {
+          let lexical;
+          try { lexical = JSON.parse(result.json)?.NBest?.[0]?.Lexical; }
+          catch { /* Detailed text is optional. */ }
+          onText(result.text || "", true, typeof lexical === "string" ? lexical : undefined);
+        } else if (result.reason === sdk.ResultReason.NoMatch) onText("", true);
       };
       recognizer.sessionStopped = () => close(inputEnded ? null : new Error("Azure stream ended early."), inputEnded);
       recognizer.canceled = (_, event) => {

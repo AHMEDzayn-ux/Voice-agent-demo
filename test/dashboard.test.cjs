@@ -88,6 +88,23 @@ test("number review finds matching interim amounts and ignores thousands separat
   assert.doesNotMatch(html, /Deterministic cleanup|id="glossary"|id="live-review-rules"/);
 });
 
+test("spoken account groups preserve leading zeros when the matching words are available", () => {
+  const words = "බිංදු දෙකයි, විසි පහයි, පනස් දෙක";
+  const label = "account number එක ";
+  const digits = "02-25-52";
+  assert.deepEqual(core.repeatedZeroRevisions(label + digits, [label + words]), [{
+    start: label.length, end: label.length + digits.length, final: digits, alternatives: ["002552"], spoken: words,
+  }]);
+  assert.equal(core.repeatedZeroRevisions(label + words, [])[0].alternatives[0], "002552");
+  assert.equal(core.repeatedZeroRevisions("Bindu dekay, vishi pahy, panas deka", [], label.trimEnd() + ".")[0].alternatives[0], "002552");
+  assert.equal(core.repeatedZeroRevisions(label + "double zero 25 52", [])[0].alternatives[0], "002552");
+  assert.deepEqual(core.repeatedZeroRevisions(label + digits, []), []);
+  assert.deepEqual(core.repeatedZeroRevisions(label + digits, [label + "බිංදුව දෙක විසි පහයි පනස් දෙක"]), []);
+  assert.deepEqual(core.repeatedZeroRevisions(label + "02-25-53", [label + words]), []);
+  assert.deepEqual(core.repeatedZeroRevisions("price " + digits, [words]), []);
+  assert.deepEqual(core.repeatedZeroRevisions(label + "002552", [words]), []);
+});
+
 test("comparison tabs are exclusive, keyboard-accessible, and preserve playback", async () => {
   const { nodes, browser } = initDashboard();
   assert.equal(nodes["tab-replay"], undefined);
@@ -393,7 +410,8 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
 
 test("recording automatically streams to configured providers and shares identical cleanup while it plays", async () => {
   const sent = { deepgram: [], gemini: [], openai: [], azure: [] };
-  const final = "\u0dc3\u0dd2 fiber package 2048";
+  const final = "\u0dc3\u0dd2 fiber package 2048 account number එක 022552";
+  const spokenAccount = final.replace("022552", "බිංදු දෙකයි විසි පහයි පනස් දෙක");
   const short = "\u0dc4\u0dbb\u0dd2";
   const clocks = [];
   const keepAlive = [];
@@ -503,6 +521,7 @@ test("recording automatically streams to configured providers and shares identic
   }
   const SpeechSDK = {
     PropertyId: { Speech_SegmentationSilenceTimeoutMs: 1 },
+    OutputFormat: { Detailed: 1 },
     ResultReason: { RecognizedSpeech: 3 },
     SpeechConfig: { fromAuthorizationToken(token, region) {
       assert.equal(token, "azure-session-fixture");
@@ -520,14 +539,19 @@ test("recording automatically streams to configured providers and shares identic
         },
         close() {
           queueMicrotask(() => {
-            azureRecognizer.recognized(null, { result: { text: final, reason: 3 } });
+            const json = JSON.stringify({ NBest: [{ Lexical: spokenAccount }] });
+            azureRecognizer.recognized(null, { result: { text: final, reason: 3, json } });
             azureRecognizer.sessionStopped();
           });
         },
       };
     } },
     SpeechRecognizer: class {
-      constructor(config) { assert.equal(config.speechRecognitionLanguage, "si-LK"); azureRecognizer = this; }
+      constructor(config) {
+        assert.equal(config.speechRecognitionLanguage, "si-LK");
+        assert.equal(config.outputFormat, 1);
+        azureRecognizer = this;
+      }
       startContinuousRecognitionAsync() { queueMicrotask(() => this.sessionStarted()); }
       close() { azureClosed = true; }
     },
@@ -643,6 +667,7 @@ test("recording automatically streams to configured providers and shares identic
   const interimNumber = final.replace("2048", "2058");
   emitDeepgram(final.replace("2048", "2999"), false, 0.5);
   emitDeepgram(interimNumber, false);
+  emitDeepgram(spokenAccount, false);
   emitDeepgram(final, true);
   emitDeepgram(short, false);
   assert.deepEqual(cleanupBodies, [{ text: final, context: "" }, { text: final, context: final }]);
@@ -661,6 +686,7 @@ test("recording automatically streams to configured providers and shares identic
   assert.equal(transcriptText(nodes["live-review-llm"]), `${final}. ${final}. ${short}.`);
   assert.equal(nodes["live-review-llm-score"].textContent, "Score after complete output");
   assert.equal(nodes["number-review"].hidden, false);
+  assert.equal(nodes["number-changes"].children.length, 2);
   const amountSelect = nodes["number-changes"].children[0].children[1];
   assert.deepEqual(amountSelect.children.map((option) => option.value), ["", "2058"]);
   amountSelect.value = "2058";
@@ -694,6 +720,13 @@ test("recording automatically streams to configured providers and shares identic
   nodes["live-review-provider"].callbacks.change();
   assert.equal(transcriptText(nodes["live-review-raw"]), final);
   assert.equal(transcriptText(nodes["live-review-llm"]), `${final}.`);
+  const numberSelect = nodes["number-changes"].children[0].children[1];
+  assert.deepEqual(numberSelect.children.map((option) => option.value), ["", "002552"]);
+  assert.match(nodes["number-changes"].textContent, /Recognized words: බිංදු දෙකයි/);
+  numberSelect.value = "002552";
+  numberSelect.callbacks.change();
+  assert.equal(transcriptText(nodes["reviewed-transcript"]), final.replace("022552", "002552"));
+  assert.equal(transcriptText(nodes["live-review-raw"]), final);
   assert.ok(nodes["live-review-raw"].children.some((word) => word.className === "diff-missing"));
   assert.ok(nodes["live-review-llm"].children.some((word) => word.className === "diff-missing"));
   for (const panel of nodes["live-feeds"].children) {

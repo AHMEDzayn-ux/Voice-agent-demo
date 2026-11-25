@@ -167,6 +167,69 @@
     });
   }
 
+  const identifierLabel = /(?<![\p{L}\p{M}])(?:account[ \t]+(?:number|no\.?)|(?:phone|telephone)[ \t]+(?:number|no\.?)|NIC(?:[ \t]+(?:number|no\.?))?|ගිණුම්[ \t]+අංකය|දුරකථන[ \t]+අංකය|හැඳුනුම්පත්[ \t]+අංකය)(?![\p{L}\p{M}])\s*(?:එක(?![\p{L}\p{M}])\s*)?[:#]?\s*/giu;
+  const repeatedZero = /^(?:බි(?:ං|න්)දු[ \t]+දෙක(?:යි|ය)?|bindu[ \t]+deka(?:y|i)?|double[ \t]+zeros?|two[ \t]+zeros)(?![\p{L}\p{M}\d])/iu;
+  const sinhalaUnits = ["", "එක", "දෙක", "තුන", "හතර", "පහ", "හය", "හත", "අට", "නවය"];
+  const sinhalaTens = ["", "", "විසි", "තිස්", "හතළිස්", "පනස්", "හැට", "හැත්තෑ", "අසූ", "අනූ"];
+  const spokenUnits = new Map(sinhalaUnits.slice(1).map((word, index) => [word, index + 1]));
+  spokenUnits.set("pah", 5);
+  spokenUnits.set("deka", 2);
+  const spokenTens = new Map(sinhalaTens.slice(2).map((word, index) => [word, (index + 2) * 10]));
+  spokenTens.set("vishi", 20);
+  spokenTens.set("panas", 50);
+
+  function identifierStarts(text, followingLabel) {
+    const offsets = [...text.matchAll(identifierLabel)].map((match) => match.index + match[0].length);
+    return followingLabel ? [0, ...offsets] : offsets;
+  }
+
+  function readRepeatedZero(text) {
+    const marker = repeatedZero.exec(text);
+    if (!marker) return null;
+    let value = "00";
+    let end = marker[0].length;
+    while (value.length < 24) {
+      const group = /^[\s,–-]+(?:(\d+)|([\p{L}\p{M}]+)[ \t]+([\p{L}\p{M}]+))/u.exec(text.slice(end));
+      if (!group) break;
+      const tens = spokenTens.get(group[2]?.toLowerCase());
+      const units = spokenUnits.get(group[3]?.toLowerCase().replace(/(?:යි|y)$/u, ""));
+      const digits = group[1] || (tens && units ? String(tens + units) : "");
+      if (!digits || value.length + digits.length > 24) break;
+      value += digits;
+      end += group[0].length;
+    }
+    return { end, value };
+  }
+
+  function repeatedZeroRevisions(finalText, interims, previousText = "") {
+    const afterLabel = identifierStarts(previousText, false).some((offset) => /^[.!?]*$/u.test(previousText.slice(offset)));
+    return identifierStarts(finalText, afterLabel).flatMap((start) => {
+      const tail = finalText.slice(start);
+      const spoken = readRepeatedZero(tail);
+      if (spoken) {
+        const words = tail.slice(0, spoken.end);
+        return [{ start, end: start + spoken.end, final: words, alternatives: [spoken.value], spoken: words }];
+      }
+      const displayed = /^02(?:[ \t,–-]*\d)*/u.exec(tail)?.[0];
+      if (!displayed) return [];
+      const expected = `00${displayed.slice(2).replace(/\D/g, "")}`;
+      for (const sample of interims) {
+        const words = sample.trimStart();
+        for (const offset of identifierStarts(words, true)) {
+          const parsed = readRepeatedZero(words.slice(offset));
+          if (parsed?.value === expected) {
+            return [{ start, end: start + displayed.length, final: displayed, alternatives: [expected], spoken: words.slice(offset, offset + parsed.end) }];
+          }
+        }
+      }
+      return [];
+    });
+  }
+
+  function hasRepeatedZero(text) {
+    return repeatedZero.test(text.trimStart()) || identifierStarts(text, false).some((start) => repeatedZero.test(text.slice(start)));
+  }
+
   function observe(events, time) {
     const visible = events.filter((event) => event[0] <= time);
     const nonempty = visible.filter((event) => event[1].trim());
@@ -229,5 +292,5 @@
     };
   }
 
-  return { elapsed, score, diffWords, digitsChanged, numberRevisions, observe, estimateCosts };
+  return { elapsed, score, diffWords, digitsChanged, numberRevisions, repeatedZeroRevisions, hasRepeatedZero, observe, estimateCosts };
 });

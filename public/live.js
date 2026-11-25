@@ -250,10 +250,10 @@
       for (const { part, change } of changes) {
         const label = make("label", null);
         const select = make("select", null);
-        select.append(make("option", `Keep final: ${change.final}`));
+        select.append(make("option", `Keep provider text: ${change.final}`));
         select.children[0].value = "";
         for (const value of change.alternatives) {
-          const option = make("option", `Use interim: ${value}`);
+          const option = make("option", `${change.spoken ? "Use spoken digits" : "Use interim"}: ${value}`);
           option.value = value;
           select.append(option);
         }
@@ -262,9 +262,11 @@
           change.selected = select.value;
           renderReview();
         });
-        const caption = make("span", `Final ${change.final} · Interim ${change.alternatives.join(" / ")}`);
+        const source = change.spoken ? "Spoken groups suggest" : "Interim";
+        const caption = make("span", `Provider ${change.final} · ${source} ${change.alternatives.join(" / ")}`);
         const excerpt = part.raw.slice(Math.max(0, change.start - 35), change.end + 35);
         caption.append(make("small", `${elapsed(part.sttMs / 1000)} · ${excerpt}`));
+        if (change.spoken && change.spoken !== change.final) caption.append(make("small", `Recognized words: ${change.spoken}`));
         label.append(caption, select);
         list.append(label);
       }
@@ -361,7 +363,7 @@
       : "";
     const numberCount = parts.reduce((total, part) => total + part.numberChanges.length, 0);
     ui.reviewNumbers.hidden = !numberCount;
-    ui.reviewNumbers.textContent = numberCount === 1 ? "Review 1 changed number" : `Review ${numberCount} changed numbers`;
+    ui.reviewNumbers.textContent = numberCount === 1 ? "Review 1 number" : `Review ${numberCount} numbers`;
     renderPipeline(run, provider, ui, pipeline.latest, fallbackVisible);
   }
 
@@ -373,7 +375,7 @@
       const [arrival, raw, final] = event;
       const earlier = pipeline.interims.get(segment) || [];
       if (!final) {
-        if (/\p{Nd}/u.test(raw) && !earlier.includes(raw)) {
+        if ((/\p{Nd}/u.test(raw) || core.hasRepeatedZero(raw)) && !earlier.includes(raw)) {
           earlier.push(raw);
           if (earlier.length > 32) earlier.shift();
           pipeline.interims.set(segment, earlier);
@@ -382,7 +384,12 @@
       }
       pipeline.interims.delete(segment);
       if (!raw.trim()) continue;
-      const part = { raw: raw.trim(), sttMs: arrival * 1000, numberChanges: core.numberRevisions(raw.trim(), earlier) };
+      const text = raw.trim();
+      const spoken = core.repeatedZeroRevisions(text, message.lexical ? [...earlier, message.lexical] : earlier, pipeline.latest?.raw);
+      const interims = core.numberRevisions(text, earlier).filter((change) =>
+        !spoken.some((revision) => revision.start < change.end && change.start < revision.end));
+      const numberChanges = [...spoken, ...interims].sort((a, b) => a.start - b.start);
+      const part = { raw: text, sttMs: arrival * 1000, numberChanges };
       pipeline.parts.set(provider === "openai" ? segment : event, part);
       pipeline.latest = part;
       if (run.llmEnabled) pipeline.pending.push(part);
@@ -626,9 +633,9 @@
       run.azure = await window.LiveAzure.connect(sdk, session, {
         signal: run.controller.signal,
         onError: fail,
-        onText(text, final) {
+        onText(text, final, lexical) {
           if (current !== run || run.started === null || run.sealed.has("azure")) return;
-          receiveTranscripts(run, "azure", [[(performance.now() - run.started) / 1000, text, final]]);
+          receiveTranscripts(run, "azure", [[(performance.now() - run.started) / 1000, text, final]], { lexical });
         },
       });
       if (current === run && run.azure.active) states.azure.status.textContent = "Streaming · Sinhala";
