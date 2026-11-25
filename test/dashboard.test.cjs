@@ -193,7 +193,7 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   const recordings = nodes["live-recording"];
   assert.equal(recordings.children.length, 1);
   assert.equal(recordings.children[0].label, "Simulated recordings");
-  assert.equal(recordings.children[0].children.length, 15);
+  assert.equal(recordings.children[0].children.length, 18);
   assert.equal(recordings.value, "pause_and_talk/clean");
   assert.match(nodes["live-reference"].value, /^සුළු අසනීපයක්/);
   recordings.value = "code_switch/phone_office";
@@ -234,6 +234,21 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   assert.equal(southern.readUInt16LE(22), 1);
   assert.equal(southern.readUInt32LE(24), 16000);
   assert.equal(southern.readUInt32LE(40), 787584 * 2);
+  for (const condition of ["clean", "fan", "office"]) {
+    const id = `southern_accent/phone_${condition}`;
+    assert.ok(recordings.children[0].children.some((entry) => entry.value === id));
+    recordings.value = id;
+    recordings.callbacks.change();
+    assert.equal(nodes["live-reference"].value, browser.DEMO_REFERENCES.southern_accent);
+    const phone = fs.readFileSync(path.join(site, `assets/southern-accent-phone-${condition}.wav`));
+    assert.equal(phone.readUInt16LE(22), 1);
+    assert.equal(phone.readUInt32LE(24), 8000);
+    assert.equal(phone.readUInt32LE(40), 393792 * 2);
+  }
+  nodes["live-llm"].callbacks.change({ target: { checked: true } });
+  assert.equal(nodes["live-stage"].value, "llm");
+  nodes["live-llm"].callbacks.change({ target: { checked: false } });
+  assert.equal(nodes["live-stage"].value, "raw");
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
   input.callbacks.change({ target: input });
@@ -610,6 +625,9 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(cleanupBodies[2], { text: short, context: `${final}\n${final}` });
   assert.deepEqual(liveText.children.map((child) => child.textContent), [`${final}.`, ` ${final}.`, ` ${short}.`]);
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
+  assert.equal(transcriptText(nodes["live-review-raw"]), `${final} ${final} ${short}`);
+  assert.equal(transcriptText(nodes["live-review-llm"]), `${final}. ${final}. ${short}.`);
+  assert.equal(nodes["live-review-llm-score"].textContent, "Score after complete output");
   nodes["live-stage"].value = "raw";
   nodes["live-stage"].callbacks.change();
   playback.onended();
@@ -658,7 +676,7 @@ test("recording automatically streams to configured providers and shares identic
   for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[1].children[0].children[0].textContent, `${final}.`);
 });
 
-test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digits", async (t) => {
+test("cleanup preserves numbers, dialect and email while allowing supported formatting", async (t) => {
   const key = process.env.GOOGLE_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
   delete process.env.GROQ_API_KEY;
@@ -671,6 +689,7 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
   });
   const text = "\u0dc3\u0dd2 2048";
   const context = "\u0db8\u0dda fiber package 2048";
+  let input = text;
   let output = `${text}.`;
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url.startsWith("https://api.groq.com/")) {
@@ -679,14 +698,14 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
       assert.equal(model, "qwen/qwen3.8-27b");
       assert.equal(reasoning_effort, "none");
       assert.match(messages[0].content, /Return only the corrected current chunk/);
-      assert.deepEqual(JSON.parse(messages[1].content), { text, context });
+      assert.deepEqual(JSON.parse(messages[1].content), { text: input, context });
       return { ok: true, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: output } }] }) };
     }
     assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
     assert.equal(options.headers["x-goog-api-key"], "example-cleanup-key");
     const request = JSON.parse(options.body);
     assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
-    assert.deepEqual(JSON.parse(request.contents[0].parts[0].text), { text, context });
+    assert.deepEqual(JSON.parse(request.contents[0].parts[0].text), { text: input, context });
     return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: output }] } }] }) };
   });
   const response = () => ({
@@ -724,6 +743,27 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
   await liveCleanup({ method: "POST", body: { text, context } }, fast);
   assert.equal(fast.code, 200);
   assert.equal(fast.body.model, "qwen/qwen3.8-27b");
+
+  input = "අප්පා රවුටර් එකට රුපියල් 28550. හෙට උදේ 9.30ට—නෑ 10.30ට. අකවුන්ට් number එක 0045 8892 10. NIC 1234 v. email test.name@example.com.";
+  const formatted = "අප්පා Router එකට රුපියල් 28,550. හෙට උදේ 9:30ට—නෑ 10:30ට. Account number එක 0045-8892-10. NIC 1234V. email test.name@example.com.";
+  output = formatted;
+  const allowed = response();
+  await liveCleanup({ method: "POST", body: { text: input, context } }, allowed);
+  assert.equal(allowed.code, 200, allowed.body.error);
+  assert.equal(allowed.body.text, formatted);
+  for (const candidate of [
+    formatted.replace("28,550", "28,551"),
+    formatted.replace("9:30ට—නෑ ", ""),
+    formatted.replace("0045-8892-10", "045-8892-10"),
+    formatted.replace("test.name@example.com", "testname@example.com"),
+    formatted.replace("රුපියල් 28,550", "රුපියල් -28,550"),
+    formatted.replace("Router", "modem"),
+  ]) {
+    output = candidate;
+    const blocked = response();
+    await liveCleanup({ method: "POST", body: { text: input, context } }, blocked);
+    assert.equal(blocked.code, 422);
+  }
 });
 
 test("Groq STT validates the chunk and wraps its PCM without changing samples", async (t) => {

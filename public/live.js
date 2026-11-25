@@ -40,6 +40,9 @@
     { id: "urban_fast/phone_fan", label: "Fast urban speech · Telephone + fan noise", audio: "assets/urban-fast-phone-fan.wav" },
     { id: "urban_fast/phone_office", label: "Fast urban speech · Telephone + office noise", audio: "assets/urban-fast-phone-office.wav" },
     { id: "southern_accent/clean", label: "Southern Sinhala accent · Clean recording", audio: "assets/southern-accent.wav" },
+    { id: "southern_accent/phone_clean", label: "Southern Sinhala accent · Telephone (G.711 A-law)", audio: "assets/southern-accent-phone-clean.wav" },
+    { id: "southern_accent/phone_fan", label: "Southern Sinhala accent · Telephone + fan noise", audio: "assets/southern-accent-phone-fan.wav" },
+    { id: "southern_accent/phone_office", label: "Southern Sinhala accent · Telephone + office noise", audio: "assets/southern-accent-phone-office.wav" },
   ]);
   let localFile = null;
   let current = null;
@@ -221,28 +224,31 @@
     const reference = referenceInput.value;
     const finished = run && run !== current;
     const complete = finished && states[provider].status.textContent === "Complete" && (!run.playback || run.playback.ended);
-    const parts = finished ? finalizedParts(run, provider) : [];
+    const parts = run ? finalizedParts(run, provider) : [];
     const fragments = run?.llmEnabled ? llmFragments(parts) : [];
     const pending = run?.llmEnabled && parts.some((part) => part.batch?.llm.requestMs === undefined);
     const hasCleanup = fragments.some((part) => part.corrected);
-    const raw = !finished ? "" : provider === "openai" ? run.openaiTranscript.text().raw
+    const raw = !run ? "" : provider === "openai" ? run.openaiTranscript.text().raw
       : core.observe(run.events[provider], Infinity).raw;
     const note = get("live-review-note");
     note.textContent = !run ? "Run a live test to compare results."
-      : !finished ? "Results are available when the run finishes."
+      : !finished ? `${run.recordingLabel} · Finalized chunks update as they arrive.`
         : `${run.recordingLabel} · ${complete ? "Complete" : run.playback && !run.playback.ended ? "Playback stopped early" : states[provider].status.textContent}`;
-    const missingCleanup = !run || run.llmEnabled
-      ? pending ? "Cleaning the remaining chunks…" : "No LLM-cleaned text was returned."
-      : "Enable LLM cleanup before starting a test.";
+    const waiting = "Waiting for finalized speech…";
+    let missingCleanup = finished ? "No LLM-cleaned text was returned." : waiting;
+    if (run && !run.llmEnabled) missingCleanup = "Enable LLM cleanup before starting a test.";
+    else if (pending) missingCleanup = "Cleaning finalized chunks…";
     const results = {
       raw, rules: parts.map((part) => part.rules).join(" "),
-      llm: hasCleanup && !pending ? fragments.map((part) => part.text).join(" ") : "",
+      llm: hasCleanup ? fragments.map((part) => part.text).join(" ") : "",
     };
     for (const [stage, text] of Object.entries(results)) {
       const id = `live-review-${stage}`;
-      const placeholder = !finished ? "Waiting for a completed run." : stage === "llm" ? missingCleanup : "No finalized transcript.";
-      readOutput(id, text, placeholder, complete ? reference : "");
-      const label = text ? scoreLabel(reference, complete ? core.score(reference, text) : null, complete) : "";
+      const placeholder = stage === "llm" && run ? missingCleanup
+        : finished ? "No finalized transcript." : waiting;
+      const ready = complete && (stage !== "llm" || !pending);
+      readOutput(id, text, placeholder, ready ? reference : "");
+      const label = text ? scoreLabel(reference, ready ? core.score(reference, text) : null, ready) : "";
       const fallback = stage === "llm" && text && fragments.some((part) => !part.corrected);
       get(`${id}-score`).textContent = fallback ? `${label} · Includes deterministic fallback` : label;
     }
@@ -371,7 +377,7 @@
     pipeline.active = false;
     if (lastRun === run && !run.cleanupController.signal.aborted) {
       render(run, provider);
-      if (current !== run && reviewProvider.value === provider) renderReview();
+      if (reviewProvider.value === provider) renderReview();
     }
     if (pipeline.pending.length) void requestCleanup(run, provider);
   }
@@ -499,6 +505,7 @@
     }
     queueCleanup(run, provider, events, message);
     render(run, provider);
+    if (reviewProvider.value === provider && events.some((event) => event[2])) renderReview();
   }
 
   function submitGroqChunk(run) {
@@ -930,6 +937,12 @@
     get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
+  get("live-llm").addEventListener("change", ({ target }) => {
+    const stage = get("live-stage");
+    if (target.checked) stage.value = "llm";
+    else if (stage.value === "llm") stage.value = "raw";
+    if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
+  });
   reviewPanel.addEventListener("toggle", renderReview);
   reviewProvider.addEventListener("change", renderReview);
   recordingSelect.addEventListener("change", () => selectReference(recordingReferenceKey()));
