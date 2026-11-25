@@ -266,6 +266,7 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
 test("recording streams to Azure and the other providers and shares identical cleanup while it plays", async () => {
   const sent = { deepgram: [], gemini: [], openai: [], azure: [] };
   const final = "\u0dc3\u0dd2 fiber package 2048";
+  const short = "\u0dc4\u0dbb\u0dd2";
   const clocks = [];
   let tick;
   let audioTime = 1;
@@ -274,6 +275,7 @@ test("recording streams to Azure and the other providers and shares identical cl
   let contextClosed = false;
   let azureClosed = false;
   let azureRecognizer;
+  let deepgramSocket;
   const destination = {};
   const playback = {
     connect(output) { assert.equal(output, destination); },
@@ -287,6 +289,7 @@ test("recording streams to Azure and the other providers and shares identical cl
     constructor(url, protocols) {
       super();
       this.provider = { "api.deepgram.com": "deepgram", "api.openai.com": "openai" }[url.hostname] || "gemini";
+      if (this.provider === "deepgram") deepgramSocket = this;
       if (this.provider === "openai") {
         assert.equal(url.searchParams.get("intent"), "transcription");
         assert.deepEqual(Array.from(protocols), ["realtime", "openai-insecure-api-key.ek_test"]);
@@ -394,6 +397,8 @@ test("recording streams to Azure and the other providers and shares identical cl
     },
   };
   const requested = [];
+  const cleanupBodies = [];
+  let releaseSecondCleanup;
   const audio = "assets/pause-fan_noise_10db.wav";
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController, SpeechSDK,
@@ -402,8 +407,10 @@ test("recording streams to Azure and the other providers and shares identical cl
       requested.push(url);
       if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
       if (url === "/api/live-cleanup") {
-        assert.deepEqual(JSON.parse(options.body), { text: final });
-        return { ok: true, json: async () => { wallTime += 680; return { text: `${final}.`, model: "qwen/qwen3.8-27b", apiMs: 620 }; } };
+        const body = JSON.parse(options.body);
+        cleanupBodies.push(body);
+        if (cleanupBodies.length === 2) await new Promise((resolve) => { releaseSecondCleanup = resolve; });
+        return { ok: true, json: async () => { wallTime += 680; return { text: `${body.text}.`, model: "qwen/qwen3.8-27b", apiMs: 620 }; } };
       }
       if (url === "/api/groq-transcribe") {
         assert.deepEqual(Buffer.from(JSON.parse(options.body).audio, "base64"), Buffer.concat(sent.deepgram));
@@ -462,21 +469,44 @@ test("recording streams to Azure and the other providers and shares identical cl
   assert.equal(sent.openai[0].readInt16LE(0), sent.deepgram[0].readInt16LE(0));
   assert.equal(clocks.length, 0);
   assert.equal(playing, true);
-  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  assert.deepEqual(cleanupBodies, [{ text: final, context: "" }]);
   assert.equal(requested.includes("/api/groq-transcribe"), false);
+  await new Promise(setImmediate);
+  const emitDeepgram = (transcript, isFinal) => deepgramSocket.emit({
+    type: "Results", is_final: isFinal, speech_final: isFinal, channel: { alternatives: [{ transcript }] },
+  });
+  const liveText = nodes["live-feeds"].children[0].children[1].children[0];
+  nodes["live-stage"].value = "llm";
+  nodes["live-stage"].callbacks.change();
+  emitDeepgram(final, true);
+  emitDeepgram(short, false);
+  assert.deepEqual(cleanupBodies, [{ text: final, context: "" }, { text: final, context: final }]);
+  assert.equal(liveText.children[0].textContent, `${final}.`);
+  assert.equal(liveText.children[1].className, "waiting");
+  assert.equal(liveText.children[2].className, "interim");
+  assert.equal(liveText.children[2].textContent.trim(), short);
+  emitDeepgram(short, true);
+  assert.equal(cleanupBodies.length, 2);
+  releaseSecondCleanup();
+  await new Promise(setImmediate);
+  assert.deepEqual(cleanupBodies[2], { text: short, context: `${final}\n${final}` });
+  assert.deepEqual(liveText.children.map((child) => child.textContent), [`${final}.`, ` ${final}.`, ` ${short}.`]);
+  assert.match(nodes["live-status"].textContent, /Playing and streaming/);
+  nodes["live-stage"].value = "raw";
+  nodes["live-stage"].callbacks.change();
   playback.onended();
   assert.equal(sent.openai[2].byteLength, 2880);
   assert.equal(nodes["live-progress"].value, 0.04);
   assert.equal(contextClosed, false);
   await new Promise(setImmediate);
   assert.equal(azureClosed, true);
-  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  assert.equal(cleanupBodies.length, 3);
   wallTime += 5000;
   clocks.shift().callback();
   await new Promise(setImmediate);
   assert.equal(contextClosed, true);
   assert.equal(azureClosed, true);
-  assert.equal(requested.filter((url) => url === "/api/live-cleanup").length, 1);
+  assert.equal(cleanupBodies.length, 3);
   assert.equal(requested.filter((url) => url === "/api/groq-transcribe").length, 1);
   assert.match(nodes["live-status"].textContent, /complete/i);
   for (const panel of nodes["live-feeds"].children) {
@@ -484,7 +514,7 @@ test("recording streams to Azure and the other providers and shares identical cl
     const [, details] = panel.children[2].children;
     const [summary, table] = details.children;
     assert.equal(panel.children[0].children[1].textContent, "Complete");
-    assert.equal(transcript.children[0].textContent, final);
+    assert.equal(transcript.children[0].textContent, panel.className.endsWith("deepgram") ? `${final} ${final} ${short}` : final);
     assert.match(timing.textContent, /Final received at /);
     assert.match(summary.children[1].textContent, /total$/);
     const rows = table.children[2].children;
@@ -510,20 +540,23 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
     else process.env.GROQ_API_KEY = groqKey;
   });
   const text = "\u0dc3\u0dd2 2048";
+  const context = "\u0db8\u0dda fiber package 2048";
   let output = `${text}.`;
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url.startsWith("https://api.groq.com/")) {
       assert.equal(options.headers.Authorization, "Bearer example-groq-key");
-      const { model, reasoning_effort } = JSON.parse(options.body);
+      const { model, reasoning_effort, messages } = JSON.parse(options.body);
       assert.equal(model, "qwen/qwen3.8-27b");
       assert.equal(reasoning_effort, "none");
+      assert.match(messages[0].content, /Return only the corrected current chunk/);
+      assert.deepEqual(JSON.parse(messages[1].content), { text, context });
       return { ok: true, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: output } }] }) };
     }
     assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
     assert.equal(options.headers["x-goog-api-key"], "example-cleanup-key");
     const request = JSON.parse(options.body);
     assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
-    assert.equal(request.contents[0].parts[0].text, text);
+    assert.deepEqual(JSON.parse(request.contents[0].parts[0].text), { text, context });
     return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: output }] } }] }) };
   });
   const response = () => ({
@@ -533,10 +566,12 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
   const invalid = response();
   await liveCleanup({ method: "POST", body: { text: " " } }, invalid);
   assert.equal(invalid.code, 400);
+  await liveCleanup({ method: "POST", body: { text, context: "x".repeat(481) } }, invalid);
+  assert.equal(invalid.code, 400);
   assert.equal(fetch.mock.callCount(), 0);
 
   const valid = response();
-  await liveCleanup({ method: "POST", body: { text } }, valid);
+  await liveCleanup({ method: "POST", body: { text, context } }, valid);
   assert.equal(valid.code, 200);
   assert.equal(valid.headers["Cache-Control"], "no-store");
   assert.equal(valid.body.text, `${text}.`);
@@ -544,14 +579,19 @@ test("cleanup uses Flash-Lite with minimal thinking and rejects a change to digi
 
   output = text.replace("2048", "2049");
   const rejected = response();
-  await liveCleanup({ method: "POST", body: { text } }, rejected);
+  await liveCleanup({ method: "POST", body: { text, context } }, rejected);
   assert.equal(rejected.code, 422);
   assert.equal(rejected.body.text, undefined);
+  output = `${context}\n${text}`;
+  const repeatedContext = response();
+  await liveCleanup({ method: "POST", body: { text, context } }, repeatedContext);
+  assert.equal(repeatedContext.code, 422);
+  assert.equal(repeatedContext.body.text, undefined);
 
   process.env.GROQ_API_KEY = "example-groq-key";
   output = `${text}.`;
   const fast = response();
-  await liveCleanup({ method: "POST", body: { text } }, fast);
+  await liveCleanup({ method: "POST", body: { text, context } }, fast);
   assert.equal(fast.code, 200);
   assert.equal(fast.body.model, "qwen/qwen3.8-27b");
 });

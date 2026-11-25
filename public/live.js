@@ -16,6 +16,7 @@
   const durationLimit = 120;
   const sampleRate = 16000;
   const groqChunkBytes = 4 * sampleRate * 2;
+  const cleanupContextLimit = 480;
   const recordingSelect = get("live-recording");
   const localFileId = "local-file";
   const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenarioLabel, label, audio }) => {
@@ -149,8 +150,8 @@
     ui.pipelineTotal.textContent = Number.isFinite(total) ? `${formatDuration(total)} total` : "";
     const notes = [];
     if (llm?.error) notes.push(llm.error);
-    if (pipeline?.skipped) notes.push("Kept deterministic text for this fragment.");
-    else if (llm && llm.requestMs === undefined) notes.push("Cleaning finalized text…");
+    if (llm && llm.requestMs === undefined) notes.push("Cleaning finalized chunk…");
+    else if (run.llmEnabled && pipeline && !llm) notes.push("Waiting for cleanup…");
     if (llm?.shared) notes.push("Shared cleanup request");
     if (llm?.model && !llm.shared && Number.isFinite(llm.apiMs)) notes.push(`${llm.model} API ${formatDuration(llm.apiMs)}`);
     if (llm?.text) notes.push(`${formatDuration(Math.max(0, llm.totalMs - pipeline.sttMs))} after STT final`);
@@ -163,6 +164,13 @@
     ui.cleanupNote.hidden = !notes.length;
   }
 
+  function finalizedParts(run, provider) {
+    const { parts } = run.pipeline[provider];
+    return provider === "openai"
+      ? run.openaiTranscript.finalIds().map((id) => parts.get(id)).filter(Boolean)
+      : [...parts.values()];
+  }
+
   function render(run, provider) {
     const ui = states[provider];
     const observed = core.observe(run.events[provider], Infinity);
@@ -173,12 +181,10 @@
     const { raw, interim } = provider === "openai" ? run.openaiTranscript.text() : observed;
     const pipeline = run.pipeline[provider];
     const stage = get("live-stage").value;
-    const parts = provider === "openai"
-      ? run.openaiTranscript.finalIds().map((id) => pipeline.parts.get(id)).filter(Boolean)
-      : [...pipeline.parts.values()];
+    const parts = finalizedParts(run, provider);
     ui.transcript.replaceChildren();
     let fallbackVisible = false;
-    if (stage === "llm" && run.llmEnabled && parts.length) {
+    if (stage === "llm" && run.llmEnabled && (parts.length || interim)) {
       let hasText = false;
       for (const part of parts) {
         const corrected = part.batch?.llm.text;
@@ -189,6 +195,7 @@
         ui.transcript.append(make("span", `${hasText ? " " : ""}${text}`, corrected ? null : "waiting"));
         hasText = true;
       }
+      if (interim) ui.transcript.append(make("span", `${hasText ? " " : ""}${core.clean(interim)}`, "interim"));
     } else if (stage === "llm") {
       ui.transcript.append(make("span", run.llmEnabled ? "Waiting for finalized text." : "Enable LLM cleanup before starting a test.", "waiting"));
     } else {
@@ -231,9 +238,9 @@
     }
   }
 
-  async function fetchCleanup(run, text) {
+  async function fetchCleanup(run, text, context) {
     const response = await fetch("/api/live-cleanup", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, context }),
       signal: AbortSignal.any([run.cleanupController.signal, AbortSignal.timeout(3000)]),
     });
     const result = await response.json().catch(() => ({}));
@@ -248,27 +255,25 @@
     clearTimeout(pipeline.timer);
     pipeline.timer = undefined;
     if (!pipeline.pending.length || pipeline.active || lastRun !== run || run.cleanupController.signal.aborted) return;
-    const parts = pipeline.pending.splice(0);
-    if (provider === "openai" && parts.length > 1) {
-      for (const older of parts.splice(0, parts.length - 1)) older.skipped = true;
-    }
+    // OpenAI turns can complete out of order. Keep their corrections attached to individual turns.
+    const parts = pipeline.pending.splice(0, provider === "openai" ? 1 : pipeline.pending.length);
     const latest = parts.at(-1);
     const text = parts.map((part) => part.rules).join(" ");
-    if (text.split(/\s+/u).length <= 2) {
-      for (const part of parts) part.skipped = true;
-      render(run, provider);
-      return;
-    }
+    const history = finalizedParts(run, provider);
+    const first = history.indexOf(parts[0]);
+    const context = history.slice(Math.max(0, first - 4), first).map((part) => part.rules)
+      .join("\n").slice(-cleanupContextLimit).trimStart();
+    const requestKey = JSON.stringify([context, text]);
     const start = performance.now();
     const requestAt = start - run.started;
-    const previous = run.cleanupRequests.get(text);
+    const previous = run.cleanupRequests.get(requestKey);
     const llm = { requestAt, waitMs: Math.max(0, requestAt - latest.rulesTotal), shared: Boolean(previous) };
     const batch = { llm, parts };
     for (const part of parts) part.batch = batch;
     pipeline.active = true;
     render(run, provider);
-    const requested = previous || fetchCleanup(run, text);
-    run.cleanupRequests.set(text, requested);
+    const requested = previous || fetchCleanup(run, text, context);
+    run.cleanupRequests.set(requestKey, requested);
     try {
       Object.assign(llm, await requested);
     } catch (error) {
