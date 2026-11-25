@@ -293,6 +293,7 @@ function setupViews() {
       tab.setAttribute("aria-selected", String(selected));
       tab.tabIndex = selected ? 0 : -1;
     }
+    if (name === "live") window.LiveBench?.discover();
     if (updateHash && window.location.hash !== `#${name}`) {
       window.history.replaceState(null, "", `#${name}`);
     }

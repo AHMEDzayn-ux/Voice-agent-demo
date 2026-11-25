@@ -144,6 +144,8 @@ test("live view starts with only the default provider rows and can select a loca
   assert.match(visible[0].children[2].children[1].children[0].children[0].textContent, /Pipeline timings/);
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
+  assert.equal(nodes["live-azure"], undefined);
+  assert.equal(nodes["live-groq"], undefined);
   const recordings = nodes["live-recording"];
   assert.equal(recordings.children.length, 1);
   assert.equal(recordings.children[0].label, "Simulated recordings");
@@ -263,7 +265,7 @@ test("microphone worklet produces 20 ms PCM packets and flushes its tail", () =>
   assert.equal(packets.length, 3);
 });
 
-test("recording streams to Azure and the other providers and shares identical cleanup while it plays", async () => {
+test("recording automatically streams to configured providers and shares identical cleanup while it plays", async () => {
   const sent = { deepgram: [], gemini: [], openai: [], azure: [] };
   const final = "\u0dc3\u0dd2 fiber package 2048";
   const short = "\u0dc4\u0dbb\u0dd2";
@@ -404,6 +406,9 @@ test("recording streams to Azure and the other providers and shares identical cl
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController, SpeechSDK,
     performance: { now: () => wallTime },
     async fetch(url, options) {
+      if (url === "/api/live-session" && options.method === "GET") {
+        return { ok: true, json: async () => ({ providers: ["deepgram", "gemini", "openai", "azure", "groq"] }) };
+      }
       requested.push(url);
       if (url === audio) return { ok: true, arrayBuffer: () => new Blob([fs.readFileSync(path.join(site, audio))]).arrayBuffer() };
       if (url === "/api/live-cleanup") {
@@ -418,7 +423,7 @@ test("recording streams to Azure and the other providers and shares identical cl
       }
       assert.equal(url, "/api/live-session");
       assert.equal(options.method, "POST");
-      assert.deepEqual(JSON.parse(options.body), { groq: true, azure: true });
+      assert.equal(options.body, undefined);
       return { ok: true, json: async () => ({
         tokens: { deepgram: "ephemeral-test", gemini: "auth_tokens/test", openai: "ek_test" },
         geminiSetup: { model: "models/gemini-3.8-live" },
@@ -437,9 +442,11 @@ test("recording streams to Azure and the other providers and shares identical cl
     clearTimeout() {},
   });
   assert.deepEqual(requested, []);
+  await new Promise(setImmediate);
+  const readyRows = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
+  assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "groq", "azure"]);
+  assert.match(readyRows[2].children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
-  nodes["live-groq"].checked = true;
-  nodes["live-azure"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
@@ -623,7 +630,7 @@ test("Groq STT validates the chunk and wraps its PCM without changing samples", 
   assert.equal(valid.body.text, "\u0dc3\u0dd2");
 });
 
-test("session endpoint issues only the client tokens for the requested Azure and configured realtime providers", async (t) => {
+test("session endpoint lists configured providers without minting tokens and starts them automatically", async (t) => {
   const keys = ["DEEPGRAM_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION", "LIVE_TEST_ENABLED"];
   const original = new Map(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) {
@@ -668,7 +675,7 @@ test("session endpoint issues only the client tokens for the requested Azure and
   assert.match(disabled.body.error, /API key in Vercel/);
   process.env.GROQ_API_KEY = "example-groq-key";
   const onlyGroq = makeResponse();
-  await liveSession({ method: "POST", body: { groq: true } }, onlyGroq);
+  await liveSession({ method: "POST" }, onlyGroq);
   assert.equal(onlyGroq.code, 200);
   assert.equal(onlyGroq.body.groqEnabled, true);
   process.env.GOOGLE_API_KEY = "example-google-secret";
@@ -694,15 +701,25 @@ test("session endpoint issues only the client tokens for the requested Azure and
   process.env.AZURE_SPEECH_KEY = "example-azure-secret";
   process.env.AZURE_SPEECH_REGION = "bad.host";
   const invalidAzure = makeResponse();
-  await liveSession({ method: "POST", body: { azure: true } }, invalidAzure);
+  await liveSession({ method: "POST" }, invalidAzure);
   assert.equal(invalidAzure.code, 200);
   assert.match(invalidAzure.body.errors.azure, /AZURE_SPEECH_REGION/);
+  const beforeDiscovery = fetch.mock.callCount();
+  const configured = makeResponse();
+  await liveSession({ method: "GET" }, configured);
+  assert.equal(configured.code, 200);
+  assert.deepEqual(configured.body, { providers: ["deepgram", "gemini", "openai", "groq"] });
+  assert.equal(fetch.mock.callCount(), beforeDiscovery);
   delete process.env.DEEPGRAM_API_KEY;
   delete process.env.GOOGLE_API_KEY;
   delete process.env.OPENAI_API_KEY;
   process.env.AZURE_SPEECH_REGION = "SoutheastAsia";
+  const configuredAzure = makeResponse();
+  await liveSession({ method: "GET" }, configuredAzure);
+  assert.deepEqual(configuredAzure.body, { providers: ["azure", "groq"] });
+  assert.equal(fetch.mock.callCount(), beforeDiscovery);
   const withAzure = makeResponse();
-  await liveSession({ method: "POST", body: { azure: true } }, withAzure);
+  await liveSession({ method: "POST" }, withAzure);
   assert.equal(withAzure.code, 200);
   assert.deepEqual(withAzure.body.tokens, {});
   assert.deepEqual(withAzure.body.azureSession, { token: "azure-token-test", region: "southeastasia" });

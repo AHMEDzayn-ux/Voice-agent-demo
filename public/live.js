@@ -9,7 +9,7 @@
     deepgram: { name: "Deepgram", model: "Nova-3" },
     gemini: { name: "Google", model: "Gemini 3.8 Live" },
     openai: { name: "OpenAI", model: "GPT Live Transcribe" },
-    groq: { name: "Groq", model: "Whisper Large v3" },
+    groq: { name: "Groq · 4 s chunks", model: "Whisper Large v3" },
     azure: { name: "Microsoft", model: "Azure Speech" },
   };
   const defaultFeeds = ["deepgram", "gemini"];
@@ -30,6 +30,8 @@
   let localFile = null;
   let current = null;
   let lastRun = null;
+  let configuredFeeds;
+  let discovering = false;
 
   const make = (tag, value, classes) => {
     const element = document.createElement(tag);
@@ -304,7 +306,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file", "live-llm", "live-groq", "live-azure"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-llm"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -320,6 +322,23 @@
     const notice = get("live-provider-notices");
     notice.textContent = issues.join(" · ");
     notice.hidden = issues.length === 0;
+  }
+
+  async function discover() {
+    if (configuredFeeds || discovering) return;
+    discovering = true;
+    try {
+      const response = await fetch("/api/live-session", { method: "GET", cache: "no-store", signal: AbortSignal.timeout(5000) });
+      if (!response.ok) return;
+      const { providers: configured } = await response.json();
+      if (!Array.isArray(configured)) return;
+      configuredFeeds = configured.filter((provider) => provider !== "openai" && Object.hasOwn(providers, provider));
+      if (!lastRun) showProviderRows(configuredFeeds);
+    } catch {
+      // Static previews can still show the default rows.
+    } finally {
+      discovering = false;
+    }
   }
 
   function hideFailedEmptyRow(run, provider) {
@@ -351,7 +370,7 @@
           ? "No text" : "Complete";
       }
     }
-    if (run.groq?.enabled && !run.failed.has("groq")) {
+    if (run.groq && !run.failed.has("groq")) {
       states.groq.status.textContent = run.events.groq.length ? "Complete" : "No text";
     }
     if (run.azure && !run.failed.has("azure")) {
@@ -423,7 +442,7 @@
     }
   }
 
-  async function connectAzure(run, session, preparation) {
+  async function connectAzure(run, session) {
     const fail = (message) => {
       if (current !== run) return;
       run.failed.add("azure");
@@ -431,8 +450,8 @@
       hideFailedEmptyRow(run, "azure");
     };
     try {
-      if (preparation.error) throw preparation.error;
-      run.azure = await window.LiveAzure.connect(preparation.sdk, session, {
+      const sdk = await window.LiveAzure.prepare();
+      run.azure = await window.LiveAzure.connect(sdk, session, {
         signal: run.controller.signal,
         onError: fail,
         onText(text, final) {
@@ -450,7 +469,7 @@
     if (run !== current || !bytes.byteLength) return;
     if (run.started === null) run.started = performance.now();
     let sent = 0;
-    if (run.groq?.enabled) {
+    if (run.groq) {
       bufferGroqFrame(run, bytes);
       sent++;
     }
@@ -545,7 +564,7 @@
           run.failed.add(provider);
           states[provider].status.textContent = `Disconnected (${code})`;
           hideFailedEmptyRow(run, provider);
-          if (run.started !== null && !run.groq?.enabled && !run.azure?.active && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
+          if (run.started !== null && !run.groq && !run.azure?.active && Object.values(run.sockets).every((s) => s.readyState !== WebSocket.OPEN)) {
             stop("All live streams disconnected.");
           }
         }
@@ -608,7 +627,7 @@
     }
     if (!run.playback?.ended) releaseAudio(run);
     run.audioEndedAt = performance.now();
-    if (run.groq?.enabled) submitGroqChunk(run);
+    if (run.groq) submitGroqChunk(run);
     const drains = [];
     const seal = (provider) => {
       if (current !== run) return;
@@ -646,7 +665,7 @@
       await Promise.all(drains);
       clearTimeout(deadline);
     }
-    if (run.groq?.enabled) {
+    if (run.groq) {
       await run.groq.tail;
       seal("groq");
     }
@@ -672,13 +691,11 @@
       llmEnabled: get("live-llm").checked, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
       pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
       cleanupRequests: new Map(),
-      groq: get("live-groq").checked ? { buffer: new Uint8Array(groqChunkBytes), length: 0, tail: Promise.resolve() } : null,
-      wantsAzure: get("live-azure").checked,
     };
     current = lastRun = run;
     get("live-clock").textContent = "0:00.0";
     get("live-progress").hidden = true;
-    showProviderRows(defaultFeeds);
+    showProviderRows(configuredFeeds ?? defaultFeeds);
     setBusy(true);
     get("live-status").textContent = mode === "mic" ? "Waiting for microphone permission…" : "Preparing the recording…";
     for (const provider of Object.keys(states)) {
@@ -688,7 +705,6 @@
     try {
       const context = mode === "recording" ? new AudioContext() : new AudioContext({ sampleRate });
       run.context = context;
-      const azurePreparation = run.wantsAzure ? window.LiveAzure.prepare().then((sdk) => ({ sdk }), (error) => ({ error })) : null;
       await context.resume();
       if (current !== run) return;
       let buffer;
@@ -714,10 +730,6 @@
       if (current !== run) return;
       get("live-status").textContent = "Opening provider streams…";
       const options = { method: "POST", signal: run.controller.signal, cache: "no-store" };
-      if (run.groq || run.wantsAzure) {
-        options.headers = { "Content-Type": "application/json" };
-        options.body = JSON.stringify({ ...(run.groq && { groq: true }), ...(run.wantsAzure && { azure: true }) });
-      }
       const response = await fetch("/api/live-session", options);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok && !payload.errors) {
@@ -727,23 +739,21 @@
       for (const [provider, error] of Object.entries(payload.errors || {})) {
         if (states[provider]) states[provider].status.textContent = error;
       }
-      if (run.groq && payload.groqEnabled) {
-        run.groq.enabled = true;
-        states.groq.status.textContent = "Chunked · 4 s";
+      if (payload.groqEnabled) {
+        run.groq = { buffer: new Uint8Array(groqChunkBytes), length: 0, tail: Promise.resolve() };
+        states.groq.status.textContent = "Streaming";
       }
       const setup = { gemini: payload.geminiSetup, openai: payload.openaiSetup };
-      const preparedAzure = run.wantsAzure && payload.azureSession ? await azurePreparation : null;
-      if (current !== run) return;
       const connections = Object.entries(payload.tokens || {}).map(([provider, token]) => connect(run, provider, token, setup[provider]));
-      if (preparedAzure) connections.push(connectAzure(run, payload.azureSession, preparedAzure));
+      if (payload.azureSession) connections.push(connectAzure(run, payload.azureSession));
       await Promise.all(connections);
       if (current !== run) return;
       const activeProviders = [...run.ready].filter((provider) => run.sockets[provider].readyState === WebSocket.OPEN);
-      if (run.groq?.enabled) activeProviders.push("groq");
+      if (run.groq) activeProviders.push("groq");
       if (run.azure?.active) activeProviders.push("azure");
       const requested = [...defaultFeeds, ...Object.keys(payload.tokens || {})];
       if (run.groq) requested.push("groq");
-      if (run.wantsAzure) requested.push("azure");
+      if (payload.azureSession || payload.errors?.azure) requested.push("azure");
       run.requestedProviders = [...new Set(requested)];
       run.visibleProviders = new Set(activeProviders);
       showProviderRows(run.visibleProviders, run.requestedProviders);
@@ -809,6 +819,7 @@
     cancelCleanup(lastRun);
     if (current) finish(current, "Test ended.");
   });
-  window.LiveBench = { stop };
+  window.LiveBench = { discover, stop };
   refreshRecordings();
+  if (!get("live").hidden) void discover();
 })();

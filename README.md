@@ -29,9 +29,9 @@ Open **Live test** and choose **Start mic** or select a simulated recording and 
 
 Sessions last up to two minutes. Vercel issues short-lived client tokens. Microphone capture requires HTTPS or localhost. Gemini audio responses are ignored by the interface and may still incur output charges. Anyone who can access the deployment can run tests using your configured provider quotas.
 
-Enable **Groq Whisper · 4 s chunks** to send the same live audio in four-second chunks to `whisper-large-v3`. Its arrival time includes the wait to collect each chunk. The row reports the Groq STT API time separately. [Groq speech-to-text API](https://console.groq.com/docs/speech-to-text).
+Configured providers join each live test automatically. **Groq Whisper** receives the same live audio in four-second chunks through `whisper-large-v3`. Its arrival time includes the wait to collect each chunk. The row reports the Groq STT API time separately. [Groq speech-to-text API](https://console.groq.com/docs/speech-to-text).
 
-Enable **Azure Speech** for continuous native streaming in Sinhala (`si-LK`). The Speech SDK receives the same 16 kHz mono packets as Deepgram and Gemini, with Azure segmentation set to 400 ms of silence. The same playback clock and cleanup measurements apply. The Azure resource key remains server-side. [Azure Speech language support](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=stt).
+**Azure Speech** runs continuous native streaming in Sinhala (`si-LK`). The Speech SDK receives the same 16 kHz mono packets as Deepgram and Gemini, with Azure segmentation set to 400 ms of silence. The same playback clock and cleanup measurements apply. The Azure resource key remains server-side. [Azure Speech language support](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=stt).
 
 ### Measure live cleanup
 

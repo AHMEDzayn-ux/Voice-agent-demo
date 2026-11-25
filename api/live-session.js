@@ -81,9 +81,9 @@ async function mintAzureToken(key, region) {
 
 module.exports = async function liveSession(request, response) {
   response.setHeader("Cache-Control", "no-store");
-  if (request.method !== "POST") {
-    response.setHeader("Allow", "POST");
-    return response.status(405).json({ error: "Use POST." });
+  if (request.method !== "GET" && request.method !== "POST") {
+    response.setHeader("Allow", "GET, POST");
+    return response.status(405).json({ error: "Use GET or POST." });
   }
   if (request.headers?.["sec-fetch-site"] === "cross-site") {
     return response.status(403).json({ error: "Start the live test from the demo page." });
@@ -93,21 +93,24 @@ module.exports = async function liveSession(request, response) {
     gemini: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
     openai: process.env.OPENAI_API_KEY,
   };
-  const groqEnabled = request.body?.groq === true && Boolean(process.env.GROQ_API_KEY);
-  const wantsAzure = request.body?.azure === true;
+  const groqEnabled = Boolean(process.env.GROQ_API_KEY?.trim());
   const azureKey = process.env.AZURE_SPEECH_KEY?.trim();
   const azureRegion = process.env.AZURE_SPEECH_REGION?.trim().toLowerCase();
-  const azureConfigured = wantsAzure && azureKey && /^[a-z0-9]{2,32}$/.test(azureRegion || "");
-  const configured = Object.values(keys).some(Boolean) || groqEnabled || azureConfigured;
-  if (!configured && !wantsAzure) return response.status(503).json({ error: "Configure a provider API key in Vercel to start live tests." });
+  const azureConfigured = Boolean(azureKey && /^[a-z0-9]{2,32}$/.test(azureRegion || ""));
+  const providers = Object.keys(keys).filter((name) => keys[name]);
+  if (azureConfigured) providers.push("azure");
+  if (groqEnabled) providers.push("groq");
+  if (request.method === "GET") return response.status(200).json({ providers });
+  if (!providers.length && !azureKey) {
+    return response.status(503).json({ error: "Configure a provider API key in Vercel to start live tests." });
+  }
   const [result, azure] = await Promise.all([
     mintTokens(keys),
     azureConfigured ? mintAzureToken(azureKey, azureRegion) : undefined,
   ]);
-  if (request.body?.groq === true && !groqEnabled) result.errors.groq = "Set GROQ_API_KEY in Vercel to connect.";
-  if (wantsAzure && !azure?.session) {
+  if (azureKey && !azure?.session) {
     result.errors.azure = azure?.error || "Set AZURE_SPEECH_KEY and AZURE_SPEECH_REGION in Vercel.";
   }
   const available = Object.keys(result.tokens).length || groqEnabled || azure?.session;
-  return response.status(available ? 200 : configured ? 502 : 503).json({ ...result, geminiSetup, openaiSetup, groqEnabled, azureSession: azure?.session });
+  return response.status(available ? 200 : providers.length ? 502 : 503).json({ ...result, geminiSetup, openaiSetup, groqEnabled, azureSession: azure?.session });
 };
