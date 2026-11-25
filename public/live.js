@@ -19,12 +19,13 @@
   const cleanupContextLimit = 480;
   const recordingSelect = get("live-recording");
   const localFileId = "local-file";
-  const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenarioLabel, label, audio }) => {
-    const clip = { id, label: `${scenarioLabel} · ${label}`, audio };
-    if (id !== "pause_and_talk/clean") return [clip];
+  const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, condition, scenarioLabel, label, audio }) => {
+    const conditionLabel = condition === "g711_alaw" ? "Telephone (G.711 A-law)" : label;
+    const clip = { id, label: `${scenarioLabel} · ${conditionLabel}`, audio };
+    if (id !== "pause_and_talk/g711_alaw") return [clip];
     return [clip,
-      { id: "pause_and_talk/fan_noise_10db", label: `${scenarioLabel} · Fan noise (10 dB SNR)`, audio: "assets/pause-fan_noise_10db.wav" },
-      { id: "pause_and_talk/office_noise_10db", label: `${scenarioLabel} · Office noise (10 dB SNR)`, audio: "assets/pause-office_noise_10db.wav" },
+      { id: "pause_and_talk/phone_fan", label: `${scenarioLabel} · Telephone + fan noise`, audio: "assets/pause-phone-fan.wav" },
+      { id: "pause_and_talk/phone_office", label: `${scenarioLabel} · Telephone + office noise`, audio: "assets/pause-phone-office.wav" },
     ];
   });
   let localFile = null;

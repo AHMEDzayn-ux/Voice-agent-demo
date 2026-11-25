@@ -152,8 +152,13 @@ test("live view starts with only the default provider rows and can select a loca
   assert.equal(recordings.children[0].children.length, 8);
   assert.equal(recordings.value, "pause_and_talk/clean");
   for (const condition of ["fan", "office"]) {
-    assert.ok(recordings.children[0].children.some((option) => option.value === `pause_and_talk/${condition}_noise_10db`));
-    assert.ok(fs.statSync(path.join(site, `assets/pause-${condition}_noise_10db.wav`)).size > 0);
+    const option = recordings.children[0].children.find((entry) => entry.value === `pause_and_talk/phone_${condition}`);
+    assert.match(option.textContent, new RegExp(`Telephone \\+ ${condition} noise`));
+    const audio = fs.readFileSync(path.join(site, `assets/pause-phone-${condition}.wav`));
+    assert.equal(audio.toString("ascii", 8, 16), "WAVEfmt ");
+    assert.equal(audio.readUInt16LE(22), 1);
+    assert.equal(audio.readUInt32LE(24), 8000);
+    assert.equal(audio.readUInt16LE(34), 16);
   }
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
@@ -401,7 +406,7 @@ test("recording automatically streams to configured providers and shares identic
   const requested = [];
   const cleanupBodies = [];
   let releaseSecondCleanup;
-  const audio = "assets/pause-fan_noise_10db.wav";
+  const audio = "assets/pause-phone-fan.wav";
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController, SpeechSDK,
     performance: { now: () => wallTime },
@@ -447,7 +452,7 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "groq", "azure"]);
   assert.match(readyRows[2].children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
-  nodes["live-recording"].value = "pause_and_talk/fan_noise_10db";
+  nodes["live-recording"].value = "pause_and_talk/phone_fan";
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
   assert.equal(playback.buffer.length, 640);

@@ -39,7 +39,14 @@ Use the **Transcript** selector to switch among **Raw transcript**, **Determinis
 
 Expand **Pipeline timings** in a provider row to see added and cumulative latency for its latest finalized segment, including time in the cleanup queue and the browser request. **Total** starts at the first audio packet. Shared requests are marked so their elapsed time can be distinguished from a fresh model request. With a Groq key, the server uses `qwen/qwen3.8-27b` with reasoning disabled and a 1.4-second upstream deadline. Gemini 3.5 Flash-Lite is used when only a Google key is configured, with a 2.2-second upstream deadline. The app discards corrections that change numeric sequences, change English words, remove Sinhala script, or change too much of the text.
 
-Compare **Pauses and restarts · Clean recording** with its fan and office variants. Each mix uses the same speech and timing. The added noise level gives a 10 dB signal-to-noise ratio over speech intervals estimated with Silero VAD. The fan and office source recordings are CC0. [Computer Fan Loop by Ezcah](https://freesound.org/people/Ezcah/sounds/242042/) and [Office Ambience by DiArchangeli](https://freesound.org/people/DiArchangeli/sounds/108695/).
+Compare **Pauses and restarts · Clean recording**, **Telephone (G.711 A-law)**, **Telephone + fan noise**, and **Telephone + office noise** in Live test. All four use the same speech and timing. The noise mixes target a 10 dB signal-to-noise ratio over speech intervals estimated with Silero VAD before telephone filtering. FFmpeg applies a 300–3,400 Hz band limit and a G.711 A-law encode/decode at 8 kHz mono to both noise mixes. The resulting PCM WAV files retain the telephone bandwidth for browser playback. These are simulated narrowband calls. The fan and office source recordings are CC0. [Computer Fan Loop by Ezcah](https://freesound.org/people/Ezcah/sounds/242042/) and [Office Ambience by DiArchangeli](https://freesound.org/people/DiArchangeli/sounds/108695/).
+
+To reproduce either mix, run these commands from the repository root, replacing `fan` with `office` for the office mix.
+
+```sh
+ffmpeg -i public/assets/pause-fan_noise_10db.wav -af "highpass=f=300,highpass=f=300,lowpass=f=3400,lowpass=f=3400" -ar 8000 -ac 1 -c:a pcm_alaw telephone-alaw.wav
+ffmpeg -i telephone-alaw.wav -map_metadata -1 -fflags +bitexact -c:a pcm_s16le public/assets/pause-phone-fan.wav
+```
 
 ## Preview and test
 
