@@ -31,7 +31,7 @@ Sessions last up to two minutes. Vercel issues short-lived client tokens. Microp
 
 Configured providers join each live test automatically. **Groq Whisper** receives the same live audio in four-second chunks through `whisper-large-v3`. Its arrival time includes the wait to collect each chunk. The row reports the Groq STT API time separately. [Groq speech-to-text API](https://console.groq.com/docs/speech-to-text).
 
-**OpenAI GPT Live Transcribe** stays visible directly above Groq Whisper. When unavailable, its row shows the connection status and keeps the transcript and timings collapsed.
+Deepgram, Gemini and **OpenAI GPT Live Transcribe** stay visible during a test. If a connection fails before delivering text, the row shows its status and collapses the empty transcript and timings. Deepgram keeps its connection alive while the other providers finish opening so they can receive audio from the same starting point.
 
 **Azure Speech** runs continuous native streaming in Sinhala (`si-LK`). The Speech SDK receives the same 16 kHz mono packets as Deepgram and Gemini, with Azure segmentation set to 400 ms of silence. The same playback clock and cleanup measurements apply. The Azure resource key remains server-side. [Azure Speech language support](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=stt).
 

@@ -248,12 +248,12 @@ test("an OpenAI credit error keeps the OpenAI row visible while other providers 
   });
   await nodes["live-stream"].callbacks.click();
   const visible = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
-  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "openai"]);
-  assert.equal(visible[1].children[0].children[1].textContent, "API credits exhausted");
+  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "openai"]);
+  assert.equal(visible[1].children[0].children[1].textContent, "Gemini unavailable");
   assert.equal(visible[1].children[1].hidden, true);
-  assert.equal(nodes["live-provider-notices"].hidden, false);
-  assert.match(nodes["live-provider-notices"].textContent, /Gemini unavailable/);
-  assert.doesNotMatch(nodes["live-provider-notices"].textContent, /GPT Live Transcribe/);
+  assert.equal(visible[2].children[0].children[1].textContent, "API credits exhausted");
+  assert.equal(visible[2].children[1].hidden, true);
+  assert.equal(nodes["live-provider-notices"].hidden, true);
 });
 
 test("OpenAI input keeps the resampling phase and commits speech at a pause", () => {
@@ -313,7 +313,10 @@ test("recording automatically streams to configured providers and shares identic
   const final = "\u0dc3\u0dd2 fiber package 2048";
   const short = "\u0dc4\u0dbb\u0dd2";
   const clocks = [];
+  const keepAlive = [];
   let tick;
+  let startupHeartbeat;
+  let completeGeminiSetup;
   let audioTime = 1;
   let wallTime = 123;
   let playing = false;
@@ -367,7 +370,12 @@ test("recording automatically streams to configured providers and shares identic
         return;
       }
       if (message?.setup) {
-        queueMicrotask(() => this.emit({ setupComplete: {} }));
+        completeGeminiSetup = () => this.emit({ setupComplete: {} });
+        return;
+      }
+      if (message?.type === "KeepAlive") {
+        assert.equal(this.provider, "deepgram");
+        keepAlive.push(message);
         return;
       }
       if (message?.type === "CloseStream" || message?.realtimeInput?.audioStreamEnd) {
@@ -475,7 +483,11 @@ test("recording automatically streams to configured providers and shares identic
         azureSession: { token: "azure-session-fixture", region: "southeastasia" },
       }) };
     },
-    setInterval(callback) { tick = callback; return 0; },
+    setInterval(callback, delay) {
+      if (delay === 3000) startupHeartbeat = callback;
+      else tick = callback;
+      return delay;
+    },
     clearInterval() {},
     setTimeout(callback, delay) {
       if (delay >= 8000) return 0;
@@ -494,10 +506,19 @@ test("recording automatically streams to configured providers and shares identic
   nodes["live-recording"].callbacks.change();
   nodes["live-reference"].value = `${final} ${final} ${short}`;
   nodes["live-reference"].callbacks.input();
-  await nodes["live-stream"].callbacks.click();
+  const starting = nodes["live-stream"].callbacks.click();
+  await new Promise(setImmediate);
+  assert.equal(playing, false);
+  startupHeartbeat();
+  assert.deepEqual(keepAlive, [{ type: "KeepAlive" }]);
+  assert.equal(sent.deepgram.length, 0);
+  completeGeminiSetup();
+  await starting;
   assert.deepEqual(requested, [audio, "/api/live-session"]);
   assert.equal(playback.buffer.length, 640);
   assert.equal(playing, true);
+  startupHeartbeat();
+  assert.equal(keepAlive.length, 1);
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
   assert.equal(readyRows[0].children[1].children[3].hidden, true);
   assert.equal(nodes["live-progress"].hidden, false);
