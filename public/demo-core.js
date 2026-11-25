@@ -5,7 +5,6 @@
   if (typeof module === "object" && module.exports) module.exports = core;
   else root.BenchmarkCore = core;
 })(globalThis, () => {
-  const wordCharacter = "[\\p{L}\\p{M}\\p{N}\\u200c\\u200d]";
   const segmenter = typeof Intl.Segmenter === "function"
     ? new Intl.Segmenter("si", { granularity: "grapheme" })
     : null;
@@ -13,29 +12,6 @@
   function elapsed(seconds) {
     const tenths = Math.floor(Math.max(0, seconds) * 10);
     return `${Math.floor(tenths / 600)}:${String(Math.floor(tenths / 10) % 60).padStart(2, "0")}.${tenths % 10}`;
-  }
-
-  function normalizeSpacing(input) {
-    return input.normalize("NFC").replace(/\s+/gu, " ").replace(/\s+([,.;:!?])/gu, "$1").trim();
-  }
-
-  function parseGlossary(source) {
-    const lines = source.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-    if (lines.length > 25) throw new Error("Use up to 25 glossary rules.");
-    return lines.map((line) => {
-      const [heard, approved, ...extra] = line.split("=>").map((value) => normalizeSpacing(value));
-      if (!heard || !approved || extra.length) throw new Error("Enter each rule as heard term => approved term.");
-      const literal = heard.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-      return {
-        pattern: new RegExp(`(?<!${wordCharacter})${literal}(?!${wordCharacter})`, "giu"),
-        approved,
-      };
-    });
-  }
-
-  function clean(text, rules = []) {
-    return rules.reduce((result, { pattern, approved }) => result.replace(pattern, () => approved),
-      normalizeSpacing(text));
   }
 
   function normalizedWords(text) {
@@ -158,6 +134,39 @@
     return JSON.stringify(digitSequences(raw)) !== JSON.stringify(digitSequences(candidate));
   }
 
+  function numberSlots(text) {
+    const slots = [];
+    for (const match of text.matchAll(/[-+−]?\p{Nd}+(?:[.,:/-]\p{Nd}+)*/gu)) {
+      const value = match[0];
+      const start = match.index;
+      const end = start + value.length;
+      const key = /^[-+−]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(value) ? value.replaceAll(",", "") : value;
+      const before = normalizedWords(text.slice(Math.max(0, start - 80), start)).at(-1);
+      const after = normalizedWords(text.slice(end, end + 80))[0];
+      slots.push({ value, key, start, end, before, after });
+    }
+    return slots;
+  }
+
+  function numberRevisions(finalText, interims) {
+    const slots = numberSlots(finalText);
+    if (!slots.length) return [];
+    const snapshots = interims.map(numberSlots).reverse();
+    return slots.flatMap((slot, index) => {
+      const alternatives = new Map();
+      for (const snapshot of snapshots) {
+        const prior = snapshot[index];
+        if (!prior || prior.key === slot.key) continue;
+        const sameContext = (slot.before && slot.before === prior.before) || (slot.after && slot.after === prior.after);
+        const onlyNumber = slots.length === 1 && snapshot.length === 1 && !slot.before && !prior.before && !slot.after && !prior.after;
+        if (!sameContext && !onlyNumber) continue;
+        if (!alternatives.has(prior.key)) alternatives.set(prior.key, prior.value);
+        if (alternatives.size >= 3) break;
+      }
+      return alternatives.size ? [{ start: slot.start, end: slot.end, final: slot.value, alternatives: [...alternatives.values()] }] : [];
+    });
+  }
+
   function observe(events, time) {
     const visible = events.filter((event) => event[0] <= time);
     const nonempty = visible.filter((event) => event[1].trim());
@@ -221,5 +230,5 @@
     };
   }
 
-  return { elapsed, clean, parseGlossary, score, diffWords, digitsChanged, observe, estimateCosts };
+  return { elapsed, score, diffWords, digitsChanged, numberRevisions, observe, estimateCosts };
 });

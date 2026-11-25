@@ -76,13 +76,19 @@ function transcriptText(node) {
     : node.textContent;
 }
 
-test("Unicode rules, literal approved terms, and numeric guard", () => {
-  const rules = core.parseGlossary("u+ => U Plus\nplan => Plan A");
-  assert.equal(core.clean("  u+   plan ,   planner.  ", rules), "U Plus Plan A, planner.");
-  assert.equal(core.clean("  e\u0301  "), "\u00e9");
-  assert.throws(() => core.parseGlossary("bad row"), /heard term/);
+test("numeric guard detects changed digit sequences", () => {
   assert.equal(core.digitsChanged("call 070 32", "call 070 33"), true);
   assert.equal(core.digitsChanged("070 32", "070   32!"), false);
+});
+
+test("number review finds matching interim amounts and ignores thousands separators", () => {
+  const transcript = "රුපියල් 28,500 ගෙව්වා.";
+  const start = transcript.indexOf("28,500");
+  assert.deepEqual(core.numberRevisions(transcript, [
+    "ගිණුම 0030 වෙනස්.", "රුපියල් 28500 ගෙව්වා.", "රුපියල් 28,550 ගෙව්වා.",
+  ]), [{ start, end: start + 6, final: "28,500", alternatives: ["28,550"] }]);
+  assert.deepEqual(core.numberRevisions("රුපියල් 28550 ගෙව්වා.", ["රුපියල් 28,550 ගෙව්වා."]), []);
+  assert.doesNotMatch(html, /Deterministic cleanup|id="glossary"|id="live-review-rules"/);
 });
 
 test("comparison tabs are exclusive, keyboard-accessible, and preserve playback", async () => {
@@ -605,12 +611,15 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(cleanupBodies, [{ text: final, context: "" }]);
   assert.equal(requested.includes("/api/groq-transcribe"), false);
   await new Promise(setImmediate);
-  const emitDeepgram = (transcript, isFinal) => deepgramSocket.emit({
-    type: "Results", is_final: isFinal, speech_final: isFinal, channel: { alternatives: [{ transcript }] },
+  const emitDeepgram = (transcript, isFinal, start = 1) => deepgramSocket.emit({
+    type: "Results", start, is_final: isFinal, speech_final: isFinal, channel: { alternatives: [{ transcript }] },
   });
   const liveText = nodes["live-feeds"].children[0].children[1].children[0];
   nodes["live-stage"].value = "llm";
   nodes["live-stage"].callbacks.change();
+  const interimNumber = final.replace("2048", "2058");
+  emitDeepgram(final.replace("2048", "2999"), false, 0.5);
+  emitDeepgram(interimNumber, false);
   emitDeepgram(final, true);
   emitDeepgram(short, false);
   assert.deepEqual(cleanupBodies, [{ text: final, context: "" }, { text: final, context: final }]);
@@ -628,6 +637,14 @@ test("recording automatically streams to configured providers and shares identic
   assert.equal(transcriptText(nodes["live-review-raw"]), `${final} ${final} ${short}`);
   assert.equal(transcriptText(nodes["live-review-llm"]), `${final}. ${final}. ${short}.`);
   assert.equal(nodes["live-review-llm-score"].textContent, "Score after complete output");
+  assert.equal(nodes["number-review"].hidden, false);
+  const amountSelect = nodes["number-changes"].children[0].children[1];
+  assert.deepEqual(amountSelect.children.map((option) => option.value), ["", "2058"]);
+  amountSelect.value = "2058";
+  amountSelect.callbacks.change();
+  assert.equal(nodes["reviewed-result"].hidden, false);
+  assert.equal(transcriptText(nodes["reviewed-transcript"]), `${final} ${interimNumber} ${short}`);
+  assert.equal(transcriptText(nodes["live-review-raw"]), `${final} ${final} ${short}`);
   nodes["live-stage"].value = "raw";
   nodes["live-stage"].callbacks.change();
   playback.onended();
@@ -665,9 +682,9 @@ test("recording automatically streams to configured providers and shares identic
     assert.match(timing.textContent, /Final received at /);
     assert.match(summary.children[1].textContent, /total$/);
     const rows = table.children[2].children;
-    assert.equal(rows[1].children[1].textContent, "0.0 ms");
+    assert.deepEqual(rows.map((row) => row.children[0].textContent), ["STT final", "Queue wait", "LLM cleanup"]);
+    assert.match(rows[1].children[2].textContent, /(?:ms|s)$/);
     assert.match(rows[2].children[2].textContent, /(?:ms|s)$/);
-    assert.match(rows[3].children[2].textContent, /(?:ms|s)$/);
     assert.match(note.textContent, /qwen\/qwen3\.8-27b API 620 ms|Shared cleanup request/);
   }
   nodes["live-stage"].value = "llm";

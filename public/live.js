@@ -49,6 +49,7 @@
   let lastRun = null;
   let configuredFeeds;
   let discovering = false;
+  let renderedNumberReview;
   const references = new Map(Object.entries(window.DEMO_REFERENCES || {}));
   let selectedReference;
 
@@ -132,7 +133,7 @@
     pipelineHead.append(headings);
     const pipelineBody = make("tbody");
     const stages = {};
-    for (const [key, label] of [["stt", "STT final"], ["rules", "Deterministic"], ["wait", "Queue wait"], ["llm", "LLM cleanup"]]) {
+    for (const [key, label] of [["stt", "STT final"], ["wait", "Queue wait"], ["llm", "LLM cleanup"]]) {
       const row = make("tr");
       const title = make("th", label);
       title.scope = "row";
@@ -148,7 +149,17 @@
     cleanupNote.hidden = true;
     const accuracy = make("p", null, "transcript-foot live-accuracy");
     accuracy.hidden = true;
-    output.append(transcript, timing, cleanupNote, accuracy);
+    const reviewNumbers = make("button", null, "number-review-button");
+    reviewNumbers.type = "button";
+    reviewNumbers.hidden = true;
+    reviewNumbers.addEventListener("click", () => {
+      if (!lastRun) return;
+      reviewProvider.value = provider;
+      reviewPanel.open = true;
+      selectReference(lastRun.referenceKey);
+      get("number-review").scrollIntoView?.({ block: "nearest" });
+    });
+    output.append(transcript, timing, cleanupNote, accuracy, reviewNumbers);
     const pipelineDetails = make("details", null, "live-pipeline-details");
     const summary = make("summary");
     const pipelineTotal = make("span", null, "pipeline-summary-total");
@@ -160,7 +171,7 @@
     output.hidden = measurements.hidden = !defaultFeeds.includes(provider);
     panel.append(header, output, measurements);
     get("live-feeds").append(panel);
-    states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal, accuracy };
+    states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal, accuracy, reviewNumbers };
   }
   reviewProvider.value = defaultFeeds[0];
 
@@ -173,7 +184,6 @@
     const llm = pipeline?.batch?.llm;
     const stageTimes = {
       stt: [pipeline?.sttMs, pipeline?.sttMs],
-      rules: [pipeline?.rulesMs, pipeline?.rulesTotal],
       wait: [llm?.waitMs, llm?.requestAt],
       llm: [llm?.requestMs, llm?.text ? llm.totalMs : null],
     };
@@ -183,7 +193,7 @@
       stage.total.textContent = formatDuration(total);
     }
     ui.stages.wait.row.hidden = !llm;
-    const total = llm?.text ? llm.totalMs : pipeline?.rulesTotal;
+    const total = llm?.text ? llm.totalMs : pipeline?.sttMs;
     ui.pipelineTotal.hidden = !Number.isFinite(total);
     ui.pipelineTotal.textContent = Number.isFinite(total) ? `${formatDuration(total)} total` : "";
     const notes = [];
@@ -196,7 +206,7 @@
     if (llm?.text && run.audioEndedAt !== undefined && run.started + llm.totalMs >= run.audioEndedAt) {
       notes.push(`${formatDuration(run.started + llm.totalMs - run.audioEndedAt)} after audio end`);
     }
-    if (fallbackVisible) notes.push("Dimmed text uses deterministic cleanup.");
+    if (fallbackVisible) notes.push("Dimmed text is from the provider.");
     if (provider === "groq" && Number.isFinite(run.groq?.apiMs)) notes.push(`Groq STT API ${formatDuration(run.groq.apiMs)}`);
     ui.cleanupNote.textContent = notes.join(" · ");
     ui.cleanupNote.hidden = !notes.length;
@@ -213,8 +223,53 @@
     return parts.flatMap((part) => {
       const corrected = part.batch?.llm.text;
       if (corrected && part.batch.parts[0] !== part) return [];
-      return [{ text: corrected || part.rules, corrected: Boolean(corrected) }];
+      return [{ text: corrected || part.raw, corrected: Boolean(corrected) }];
     });
+  }
+
+  function renderReviewedText(parts, complete) {
+    const hasSelection = parts.some((part) => part.numberChanges.some((change) => change.selected));
+    get("reviewed-result").hidden = !hasSelection;
+    if (!hasSelection) return;
+    const text = parts.map((part) => part.numberChanges.reduceRight((source, change) => {
+      return change.selected ? source.slice(0, change.start) + change.selected + source.slice(change.end) : source;
+    }, part.raw)).join(" ");
+    const reference = referenceInput.value;
+    readOutput("reviewed-transcript", text, "No reviewed text.", complete ? reference : "");
+    get("reviewed-score").textContent = scoreLabel(reference, complete ? core.score(reference, text) : null, complete);
+  }
+
+  function renderNumberReview(run, provider, parts, complete) {
+    const changes = parts.flatMap((part) => part.numberChanges.map((change) => ({ part, change })));
+    get("number-review").hidden = !changes.length;
+    if (!changes.length) return;
+    if (renderedNumberReview?.run !== run || renderedNumberReview.provider !== provider || renderedNumberReview.count !== changes.length) {
+      renderedNumberReview = { run, provider, count: changes.length };
+      const list = get("number-changes");
+      list.replaceChildren();
+      for (const { part, change } of changes) {
+        const label = make("label", null);
+        const select = make("select", null);
+        select.append(make("option", `Keep final: ${change.final}`));
+        select.children[0].value = "";
+        for (const value of change.alternatives) {
+          const option = make("option", `Use interim: ${value}`);
+          option.value = value;
+          select.append(option);
+        }
+        select.value = change.selected || "";
+        select.addEventListener("change", () => {
+          change.selected = select.value;
+          renderReview();
+        });
+        const caption = make("span", `Final ${change.final} · Interim ${change.alternatives.join(" / ")}`);
+        const excerpt = part.raw.slice(Math.max(0, change.start - 35), change.end + 35);
+        caption.append(make("small", `${elapsed(part.sttMs / 1000)} · ${excerpt}`));
+        label.append(caption, select);
+        list.append(label);
+      }
+    }
+    renderReviewedText(parts, complete);
   }
 
   function renderReview() {
@@ -239,7 +294,7 @@
     if (run && !run.llmEnabled) missingCleanup = "Enable LLM cleanup before starting a test.";
     else if (pending) missingCleanup = "Cleaning finalized chunks…";
     const results = {
-      raw, rules: parts.map((part) => part.rules).join(" "),
+      raw,
       llm: hasCleanup ? fragments.map((part) => part.text).join(" ") : "",
     };
     for (const [stage, text] of Object.entries(results)) {
@@ -250,8 +305,9 @@
       readOutput(id, text, placeholder, ready ? reference : "");
       const label = text ? scoreLabel(reference, ready ? core.score(reference, text) : null, ready) : "";
       const fallback = stage === "llm" && text && fragments.some((part) => !part.corrected);
-      get(`${id}-score`).textContent = fallback ? `${label} · Includes deterministic fallback` : label;
+      get(`${id}-score`).textContent = fallback ? `${label} · Includes provider text` : label;
     }
+    renderNumberReview(run, provider, parts, complete);
   }
 
   function render(run, provider) {
@@ -277,16 +333,14 @@
         scoredText += `${hasText ? " " : ""}${text}`;
         hasText = true;
       }
-      if (interim) ui.transcript.append(make("span", `${hasText ? " " : ""}${core.clean(interim)}`, "interim"));
+      if (interim) ui.transcript.append(make("span", `${hasText ? " " : ""}${interim}`, "interim"));
     } else if (stage === "llm") {
       ui.transcript.append(make("span", run.llmEnabled ? "Waiting for finalized text." : "Enable LLM cleanup before starting a test.", "waiting"));
     } else {
-      const text = stage === "rules" ? parts.map((part) => part.rules).join(" ") : raw;
-      scoredText = text;
-      const pending = stage === "rules" ? core.clean(interim) : interim;
-      if (text) ui.transcript.append(make("span", text));
-      if (pending) ui.transcript.append(make("span", `${text ? " " : ""}${pending}`, "interim"));
-      if (!text && !pending) ui.transcript.append(make("span", "Waiting for transcript.", "waiting"));
+      scoredText = raw;
+      if (raw) ui.transcript.append(make("span", raw));
+      if (interim) ui.transcript.append(make("span", `${raw ? " " : ""}${interim}`, "interim"));
+      if (!raw && !interim) ui.transcript.append(make("span", "Waiting for transcript.", "waiting"));
     }
     ui.transcript.scrollTop = ui.transcript.scrollHeight;
     const latest = run.latest[provider];
@@ -303,21 +357,33 @@
       ? core.score(reference, scoredText) : null;
     ui.accuracy.hidden = !score;
     ui.accuracy.textContent = score
-      ? `WER ${(score.wer * 100).toFixed(1)}% · CER ${(score.cer * 100).toFixed(1)}%${fallbackVisible ? " · Includes deterministic fallback" : ""}`
+      ? `WER ${(score.wer * 100).toFixed(1)}% · CER ${(score.cer * 100).toFixed(1)}%${fallbackVisible ? " · Includes provider text" : ""}`
       : "";
+    const numberCount = parts.reduce((total, part) => total + part.numberChanges.length, 0);
+    ui.reviewNumbers.hidden = !numberCount;
+    ui.reviewNumbers.textContent = numberCount === 1 ? "Review 1 changed number" : `Review ${numberCount} changed numbers`;
     renderPipeline(run, provider, ui, pipeline.latest, fallbackVisible);
   }
 
   function queueCleanup(run, provider, events, message = {}) {
     const pipeline = run.pipeline[provider];
+    const segment = provider === "openai" ? message.item_id
+      : provider === "deepgram" && Number.isFinite(message.start) ? Math.round(message.start * 1000) : null;
     for (const event of events) {
       const [arrival, raw, final] = event;
-      if (!final || !raw.trim()) continue;
-      const start = performance.now();
-      const rules = core.clean(raw);
-      const end = performance.now();
-      const part = { rules, sttMs: arrival * 1000, rulesMs: end - start, rulesTotal: end - run.started };
-      pipeline.parts.set(provider === "openai" ? message.item_id : event, part);
+      const earlier = pipeline.interims.get(segment) || [];
+      if (!final) {
+        if (/\p{Nd}/u.test(raw) && !earlier.includes(raw)) {
+          earlier.push(raw);
+          if (earlier.length > 32) earlier.shift();
+          pipeline.interims.set(segment, earlier);
+        }
+        continue;
+      }
+      pipeline.interims.delete(segment);
+      if (!raw.trim()) continue;
+      const part = { raw: raw.trim(), sttMs: arrival * 1000, numberChanges: core.numberRevisions(raw.trim(), earlier) };
+      pipeline.parts.set(provider === "openai" ? segment : event, part);
       pipeline.latest = part;
       if (run.llmEnabled) pipeline.pending.push(part);
     }
@@ -336,7 +402,7 @@
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || typeof result.text !== "string" || !result.text.trim()) {
-      return { ...result, text: undefined, error: result.error || "Cleanup unavailable. Kept the deterministic text." };
+      return { ...result, text: undefined, error: result.error || "Cleanup unavailable. Kept the provider transcript." };
     }
     return result;
   }
@@ -349,16 +415,16 @@
     // OpenAI turns can complete out of order. Keep their corrections attached to individual turns.
     const parts = pipeline.pending.splice(0, provider === "openai" ? 1 : pipeline.pending.length);
     const latest = parts.at(-1);
-    const text = parts.map((part) => part.rules).join(" ");
+    const text = parts.map((part) => part.raw).join(" ");
     const history = finalizedParts(run, provider);
     const first = history.indexOf(parts[0]);
-    const context = history.slice(Math.max(0, first - 4), first).map((part) => part.rules)
+    const context = history.slice(Math.max(0, first - 4), first).map((part) => part.raw)
       .join("\n").slice(-cleanupContextLimit).trimStart();
     const requestKey = JSON.stringify([context, text]);
     const start = performance.now();
     const requestAt = start - run.started;
     const previous = run.cleanupRequests.get(requestKey);
-    const llm = { requestAt, waitMs: Math.max(0, requestAt - latest.rulesTotal), shared: Boolean(previous) };
+    const llm = { requestAt, waitMs: Math.max(0, requestAt - latest.sttMs), shared: Boolean(previous) };
     const batch = { llm, parts };
     for (const part of parts) part.batch = batch;
     pipeline.active = true;
@@ -368,8 +434,8 @@
     try {
       Object.assign(llm, await requested);
     } catch (error) {
-      llm.error = error.name === "TimeoutError" ? "Cleanup timed out. Kept the deterministic text."
-        : "Cleanup unavailable. Kept the deterministic text.";
+      llm.error = error.name === "TimeoutError" ? "Cleanup timed out. Kept the provider transcript."
+        : "Cleanup unavailable. Kept the provider transcript.";
     }
     const end = performance.now();
     llm.requestMs = end - start;
@@ -813,7 +879,7 @@
       events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
       openaiInput: wire.openaiInput(), openaiTranscript: wire.openaiTranscript(), latest: {}, controller: new AbortController(),
       llmEnabled: get("live-llm").checked, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
-      pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
+      pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [], interims: new Map() }])),
       cleanupRequests: new Map(),
       referenceKey: mode === "mic" ? "microphone" : recordingReferenceKey(),
       recordingLabel: mode === "mic" ? "Microphone recording" : file?.name || clip.label,

@@ -120,15 +120,15 @@ module.exports = async function liveCleanup(request, response) {
     const normalizedCleanup = normalizeFormatting(cleaned);
     if (JSON.stringify(numberFields(normalizedText)) !== JSON.stringify(numberFields(normalizedCleanup)) ||
         JSON.stringify(emails(text)) !== JSON.stringify(emails(cleaned))) {
-      return response.status(422).json({ error: "Cleanup changed a number, ID or email. Kept the deterministic text.", apiMs, model });
+      return response.status(422).json({ error: "Cleanup changed a number, ID or email. Kept the provider transcript.", apiMs, model });
     }
     if (!correctionIsConservative(normalizedText, normalizedCleanup)) {
-      return response.status(422).json({ error: "Cleanup changed wording too much. Kept the deterministic text.", apiMs, model });
+      return response.status(422).json({ error: "Cleanup changed wording too much. Kept the provider transcript.", apiMs, model });
     }
     return response.status(200).json({ text: cleaned, apiMs, model });
   } catch (error) {
     return error.name === "TimeoutError"
-      ? response.status(504).json({ error: "Cleanup exceeded the time limit. Kept the deterministic text.", model })
+      ? response.status(504).json({ error: "Cleanup exceeded the time limit. Kept the provider transcript.", model })
       : response.status(502).json({ error: "Could not reach the cleanup model.", model });
   }
 };

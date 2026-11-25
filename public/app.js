@@ -15,7 +15,6 @@ let clip;
 let timelineEnd = 0;
 let frame = 0;
 let tail = null;
-let glossary = [];
 let cleanupSignature = "";
 let privateAudioUrls = [];
 
@@ -133,41 +132,30 @@ function updateLab(time, force = false) {
   if (!force && signature === cleanupSignature) return;
   cleanupSignature = signature;
   const raw = finished ? clip.raw[provider] : observed.raw;
-  const started = performance.now();
-  const cleaned = core.clean(raw, glossary);
-  const elapsedMs = performance.now() - started;
   const reference = el("reference").value;
   const llm = llmReady ? captured.text : "";
   readOutput("raw-output", raw, "Waiting for finalized text…", finished ? reference : "");
-  readOutput("rules-output", cleaned, "Waiting for finalized text…", finished ? reference : "");
   let waiting = "Available after the full transcript and captured cleanup delay.";
   if (finished && captured?.error) waiting = `Cleanup was unavailable in this run (${captured.error}).`;
   else if (finished && !captured) waiting = "Cleanup was unavailable for this stream.";
   readOutput("llm-output", llm, waiting, reference);
-  el("rules-meta").textContent = raw
-    ? `Local rules · ${elapsedMs < 0.1 ? "<0.1" : elapsedMs.toFixed(1)} ms`
-    : "Runs in your browser";
   el("llm-meta").textContent = captured?.text
     ? `Gemini Flash-Lite · +${latency(captured.seconds * 1000)}`
     : "Captured Gemini Flash-Lite request";
   const rawScore = finished && reference ? core.score(reference, raw) : null;
-  const rulesScore = finished && reference ? core.score(reference, cleaned) : null;
   const llmScore = llmReady && reference ? core.score(reference, llm) : null;
   el("raw-score").textContent = scoreLabel(reference, rawScore, finished);
-  el("rules-score").textContent = scoreLabel(reference, rulesScore, finished);
   el("llm-score").textContent = scoreLabel(reference, llmScore, llmReady);
-  const rulesDigits = raw && core.digitsChanged(raw, cleaned);
   const llmDigits = llmReady && core.digitsChanged(raw, llm);
-  el("rules-guard").textContent = rulesDigits ? "Review the changed digit sequences." : "";
   el("llm-guard").textContent = llmDigits ? "Review the changed digit sequences." : "";
-  let verdict = "Start with deterministic cleanup. Compare LLM gains against verified text and the extra delay.";
+  let verdict = "Compare the raw and cleaned text against the reference and check the added cleanup delay.";
   if (!finished) verdict = "Only completed transcripts are scored. Final segments appear here as the stream runs.";
-  if (llmScore && rulesScore) {
+  if (llmScore && rawScore) {
     if (llmDigits) verdict = "The LLM changed digit sequences on this sample. Check the audio before relying on the result.";
-    else if (llmScore.cer < rulesScore.cer && llmScore.wer <= rulesScore.wer) {
-      const gain = ((rulesScore.cer - llmScore.cer) * 100).toFixed(1);
-      verdict = `The LLM reduced CER by ${gain} percentage points versus rules on this sample. Review critical terms and weigh the extra delay.`;
-    } else verdict = "This sample shows no clear LLM gain over rules across both error measures.";
+    else if (llmScore.cer < rawScore.cer && llmScore.wer <= rawScore.wer) {
+      const gain = ((rawScore.cer - llmScore.cer) * 100).toFixed(1);
+      verdict = `Cleanup reduced CER by ${gain} percentage points on this sample. Review critical terms and weigh the extra delay.`;
+    } else verdict = "Check the scores and highlights to see how the LLM changed this sample.";
   }
   el("cleanup-note").textContent = verdict;
 }
@@ -274,7 +262,7 @@ function showResults() {
   audio.pause();
   tail = null;
   seek(timelineEnd);
-  for (const id of ["deepgram-text", "gemini-text", "raw-output", "rules-output", "llm-output"]) {
+  for (const id of ["deepgram-text", "gemini-text", "raw-output", "llm-output"]) {
     el(id).scrollTop = 0;
   }
   el("player-status").textContent = "Showing all captured results.";
@@ -520,16 +508,6 @@ if (window.DEMO_DATA && core) {
   el("cleanup-provider").addEventListener("change", () => updateLab(position(), true));
   el("reference").addEventListener("input", () => {
     references.set(clip.scenario, el("reference").value);
-    updateLab(position(), true);
-  });
-  el("glossary").addEventListener("input", () => {
-    try {
-      glossary = core.parseGlossary(el("glossary").value);
-      el("glossary-error").textContent = "";
-    } catch (error) {
-      glossary = [];
-      el("glossary-error").textContent = error.message;
-    }
     updateLab(position(), true);
   });
   el("play").addEventListener("click", togglePlayback);

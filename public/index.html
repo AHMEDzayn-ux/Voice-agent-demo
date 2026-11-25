@@ -79,7 +79,6 @@
       <div class="live-view-tools">
         <label>Transcript <select id="live-stage">
           <option value="raw">Raw transcript</option>
-          <option value="rules">Deterministic cleanup</option>
           <option value="llm">LLM cleanup</option>
         </select></label>
         <label><input id="live-llm" type="checkbox"> LLM cleanup</label>
@@ -96,28 +95,29 @@
         <div class="review-grid" role="region" aria-label="Live transcripts compared with the exact transcript">
           <article class="stage"><h3><label for="live-reference">Exact transcript</label></h3><textarea class="stage-output review-reference" id="live-reference" lang="si" maxlength="12000" placeholder="Paste the exact wording. For a mic test, paste it after the run."></textarea></article>
           <article class="stage"><h3>Raw</h3><div id="live-review-raw" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-raw-score" class="stage-score"></p></article>
-          <article class="stage"><h3>Deterministic</h3><div id="live-review-rules" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-rules-score" class="stage-score"></p></article>
           <article class="stage"><h3>LLM cleanup</h3><div id="live-review-llm" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-llm-score" class="stage-score"></p></article>
         </div>
+        <section id="number-review" class="number-review" aria-labelledby="number-review-heading" hidden>
+          <h3 id="number-review-heading">Numbers that changed</h3>
+          <p class="stage-meta">Check the audio before choosing a value.</p>
+          <div id="number-changes" class="number-changes"></div>
+          <div id="reviewed-result" hidden>
+            <h3>Reviewed transcript</h3>
+            <div id="reviewed-transcript" class="stage-output" lang="si" tabindex="0"></div>
+            <p id="reviewed-score" class="stage-score"></p>
+          </div>
+        </section>
       </details>
     </section>
 
     <section id="cleanup" class="view" role="tabpanel" aria-labelledby="tab-cleanup" tabindex="0" hidden>
       <div class="cleanup-toolbar">
         <div class="local-select"><label for="cleanup-provider">Transcription provider</label><select id="cleanup-provider"><option value="deepgram">Deepgram Nova-3</option><option value="gemini">Gemini 3.8 Live</option></select></div>
-        <details class="options">
-          <summary>Glossary rules</summary>
-          <div class="options-grid">
-            <div><label for="glossary">Approved term replacements</label><textarea id="glossary" maxlength="1500" rows="4" placeholder="heard term => approved term"></textarea><p>One rule per line. The rules also normalize Unicode and whitespace.</p></div>
-          </div>
-          <p id="glossary-error" role="status"></p>
-        </details>
       </div>
       <p class="review-legend"><mark class="diff-changed">Changed or extra words</mark> <del class="diff-missing">Missing words</del></p>
       <div class="review-grid" role="region" aria-label="Captured transcripts compared with the exact transcript">
         <article class="stage"><h3><label for="reference">Exact transcript</label></h3><p class="stage-meta">Shared across noise conditions</p><textarea class="stage-output review-reference" id="reference" lang="si" maxlength="4000" placeholder="Paste a human-verified transcript to score CER and WER"></textarea></article>
         <article class="stage"><h3>Raw</h3><p class="stage-meta">From the streaming provider</p><div id="raw-output" class="stage-output" lang="si" tabindex="0"></div><p id="raw-score" class="stage-score"></p></article>
-        <article class="stage"><h3>Deterministic</h3><p class="stage-meta" id="rules-meta">Runs in your browser</p><div id="rules-output" class="stage-output" lang="si" tabindex="0"></div><p id="rules-score" class="stage-score"></p><p id="rules-guard" class="guard"></p></article>
         <article class="stage"><h3>LLM cleanup</h3><p class="stage-meta" id="llm-meta">Captured Gemini Flash-Lite request</p><div id="llm-output" class="stage-output" lang="si" tabindex="0"></div><p id="llm-score" class="stage-score"></p><p id="llm-guard" class="guard"></p></article>
       </div>
       <p class="section-note" id="cleanup-note">Replay the selected sample all the way through to score complete transcripts.</p>
@@ -163,7 +163,7 @@
         <summary>Call-center rollout checks</summary>
         <div class="decision-grid">
           <article class="decision-card"><h3>Nova-3 in a voice agent</h3><p>Nova-3 streams Sinhala text. Use pause-based endpointing with your own turn and interruption logic. Deepgram's turn-aware Flux STT does not currently list Sinhala. <a href="https://developers.deepgram.com/docs/models-languages-overview">Model coverage</a></p></article>
-          <article class="decision-card"><h3>Accuracy and cleanup</h3><p>The default formatting rules changed 0 of 12 simulated outputs. Test approved glossary corrections on verified calls before enabling automatic replacements.</p></article>
+          <article class="decision-card"><h3>Accuracy and cleanup</h3><p>Compare the provider and LLM outputs against the exact transcript. Confirm disputed numbers with the caller before using them.</p></article>
           <article class="decision-card"><h3>Reliability and cost</h3><p>Track dropped sessions, no-text cases and p95 latency at peak concurrency. Price audio, model output and cleanup.</p></article>
         </div>
       </details>
@@ -214,7 +214,6 @@
         <table role="table">
           <thead><tr><th scope="col">Cleanup</th><th scope="col">Rate and billing basis</th><th scope="col">Est. / month</th><th scope="col">Evidence</th></tr></thead>
           <tbody>
-            <tr><th scope="row">Deterministic rules</th><td>Runs in the browser with no API billing.</td><td><strong>$0.00</strong></td><td>Demo implementation</td></tr>
             <tr><th scope="row">Gemini 3.5 Flash-Lite</th><td>$0.30 in / $2.50 out per 1M tokens.</td><td><output id="cost-cleanup">—</output></td><td><a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Google rate card</a></td></tr>
             <tr><th scope="row">Groq Qwen 3.8 27B</th><td>$0.80 in / $4.00 out per 1M tokens.</td><td><output id="cost-qwen">—</output></td><td><a href="https://console.groq.com/docs/model/qwen/qwen3.8-27b">Groq model pricing</a></td></tr>
           </tbody>
@@ -249,7 +248,7 @@
           <thead><tr><th scope="col">Decision</th><th scope="col">Compare on the same calls</th><th scope="col">Evidence</th></tr></thead>
           <tbody>
             <tr><th scope="row">Latency and turn taking</th><td>Track first visible text, speech-end to final text, and p50/p95. Keep audio, language and segmentation settings fixed for the Azure region comparison. Include the time Groq spends filling each chunk.</td><td><a href="#live">Live test</a></td></tr>
-            <tr><th scope="row">Accuracy and cleanup</th><td>Use exact human transcripts to score raw, deterministic, and LLM outputs. Check Sinhala–English switching, names and numbers separately.</td><td><a href="#live">Live transcript comparison</a></td></tr>
+            <tr><th scope="row">Accuracy and cleanup</th><td>Use exact human transcripts to score raw and LLM outputs. Check Sinhala–English switching, names and numbers separately.</td><td><a href="#live">Live transcript comparison</a></td></tr>
             <tr><th scope="row">Call-center load</th><td>Repeat at expected peak concurrency and record dropouts, incomplete transcripts, and quota errors.</td><td><a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits">Azure quotas</a></td></tr>
             <tr><th scope="row">Hetzner self-hosting</th><td>Hetzner quotes server rental and setup fees. Use a current server quote and benchmark the model’s latency and concurrent calls per server before costing self-hosted speech recognition.</td><td><a href="https://www.hetzner.com/dedicated-rootserver/gex45/">Hetzner GPU configurator</a></td></tr>
           </tbody>
