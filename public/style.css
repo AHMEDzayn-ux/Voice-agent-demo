@@ -82,6 +82,7 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .live-feeds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
 .live-feeds .live-provider { grid-template: auto / minmax(7.8rem, .72fr) minmax(0, 2.4fr) minmax(14.2rem, 1.05fr); align-items: start; gap: 12px; padding: 10px 12px; }
 .live-feeds .live-provider > header { display: grid; align-content: start; gap: 5px; min-height: 0; }
+.live-feeds .openai:has(> .live-output[hidden]) > header { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 .live-provider .provider { font-size: .78rem; }
 .live-provider h3 { font-size: 1rem; line-height: 1.18; letter-spacing: -.02em; }
 .live-provider .feed-status { font-size: .81rem; overflow-wrap: anywhere; }

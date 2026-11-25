@@ -134,13 +134,19 @@ test("local replay pack imports without adding any provider request", async () =
   assert.match(nodes["player-status"].textContent, /invalid audio/);
 });
 
-test("live view starts with only the default provider rows and can select a local file", () => {
-  const { nodes } = initDashboard();
+test("live view shows the OpenAI placeholder without a key and can select a local file", async () => {
+  const { nodes } = initDashboard("", {
+    async fetch() { return { ok: true, json: async () => ({ providers: ["deepgram", "gemini"] }) }; },
+  });
   nodes["tab-live"].callbacks.click();
+  await new Promise(setImmediate);
   assert.equal(nodes.live.hidden, false);
   assert.equal(nodes["replay-console"].hidden, true);
   const visible = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
-  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini"]);
+  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "openai"]);
+  assert.equal(visible[2].children[0].children[1].textContent, "API key required");
+  assert.equal(visible[2].children[1].hidden, true);
+  assert.equal(visible[2].children[2].hidden, true);
   assert.match(visible[0].children[2].children[1].children[0].children[0].textContent, /Pipeline timings/);
   assert.equal(nodes["live-passcode"], undefined);
   assert.equal(nodes["live-load-real"], undefined);
@@ -184,7 +190,7 @@ test("live wire sends identical PCM and ignores empty transcript results", () =>
   assert.equal(gemini.url.searchParams.get("access_token"), "auth_tokens/test");
 });
 
-test("an OpenAI credit error stays in the status line while a connected provider uses a row", async () => {
+test("an OpenAI credit error keeps the OpenAI row visible while other providers stream", async () => {
   class Socket extends EventTarget {
     static OPEN = 1;
     static CLOSING = 2;
@@ -213,9 +219,12 @@ test("an OpenAI credit error stays in the status line while a connected provider
   });
   await nodes["live-stream"].callbacks.click();
   const visible = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
-  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram"]);
+  assert.deepEqual(visible.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "openai"]);
+  assert.equal(visible[1].children[0].children[1].textContent, "API credits exhausted");
+  assert.equal(visible[1].children[1].hidden, true);
   assert.equal(nodes["live-provider-notices"].hidden, false);
-  assert.match(nodes["live-provider-notices"].textContent, /GPT Live Transcribe: API credits exhausted/);
+  assert.match(nodes["live-provider-notices"].textContent, /Gemini unavailable/);
+  assert.doesNotMatch(nodes["live-provider-notices"].textContent, /GPT Live Transcribe/);
 });
 
 test("OpenAI input keeps the resampling phase and commits speech at a pause", () => {
@@ -449,8 +458,8 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(requested, []);
   await new Promise(setImmediate);
   const readyRows = nodes["live-feeds"].children.filter((panel) => !panel.hidden);
-  assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "groq", "azure"]);
-  assert.match(readyRows[2].children[0].children[0].children[0].textContent, /4 s chunks/);
+  assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "azure", "openai", "groq"]);
+  assert.match(readyRows.at(-1).children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/phone_fan";
   await nodes["live-stream"].callbacks.click();
@@ -461,6 +470,8 @@ test("recording automatically streams to configured providers and shares identic
   assert.equal(nodes["live-progress"].hidden, false);
   assert.equal(nodes["live-progress"].max, 0.04);
   assert.ok(nodes["live-feeds"].children.every((panel) => !panel.hidden));
+  assert.equal(readyRows[3].children[1].hidden, false);
+  assert.equal(readyRows[3].children[2].hidden, false);
   for (const panel of nodes["live-feeds"].children.filter((entry) => !entry.className.endsWith("groq"))) {
     const [transcript, timing] = panel.children[1].children;
     assert.equal(transcript.children[0].textContent, "\u0dc3");

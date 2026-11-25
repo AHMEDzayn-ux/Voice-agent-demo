@@ -8,9 +8,9 @@
   const providers = {
     deepgram: { name: "Deepgram", model: "Nova-3" },
     gemini: { name: "Google", model: "Gemini 3.8 Live" },
+    azure: { name: "Microsoft", model: "Azure Speech" },
     openai: { name: "OpenAI", model: "GPT Live Transcribe" },
     groq: { name: "Groq · 4 s chunks", model: "Whisper Large v3" },
-    azure: { name: "Microsoft", model: "Azure Speech" },
   };
   const defaultFeeds = ["deepgram", "gemini"];
   const durationLimit = 120;
@@ -65,11 +65,11 @@
   const states = {};
   for (const [provider, { name, model }] of Object.entries(providers)) {
     const panel = make("article", null, `transcript live-provider ${provider}`);
-    panel.hidden = !defaultFeeds.includes(provider);
+    panel.hidden = provider !== "openai" && !defaultFeeds.includes(provider);
     const header = make("header");
     const title = make("div");
     title.append(make("p", name, "provider"), make("h3", model));
-    const status = make("span", "Ready", "feed-status");
+    const status = make("span", provider === "openai" ? "Awaiting session" : "Ready", "feed-status");
     header.append(title, status);
     const metrics = make("dl", null, "feed-metrics");
     const fields = {};
@@ -124,9 +124,10 @@
     pipelineDetails.append(summary, pipeline);
     const measurements = make("div", null, "live-provider-metrics");
     measurements.append(metrics, pipelineDetails);
+    output.hidden = measurements.hidden = provider === "openai";
     panel.append(header, output, measurements);
     get("live-feeds").append(panel);
-    states[provider] = { panel, status, fields, transcript, timing, stages, cleanupNote, pipelineTotal };
+    states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal };
   }
 
   function formatDuration(ms) {
@@ -314,10 +315,11 @@
 
   function showProviderRows(active, requested = []) {
     const visible = new Set(active);
-    for (const [provider, ui] of Object.entries(states)) ui.panel.hidden = !visible.has(provider);
-    const issues = requested.filter((provider) => !visible.has(provider)).map((provider) => {
+    for (const [provider, ui] of Object.entries(states)) ui.panel.hidden = provider !== "openai" && !visible.has(provider);
+    states.openai.output.hidden = states.openai.measurements.hidden = !visible.has("openai");
+    const issues = requested.filter((provider) => provider !== "openai" && !visible.has(provider)).map((provider) => {
       const status = states[provider].status.textContent;
-      const message = status === "Connecting" ? "Unavailable" : status.replace(/^OpenAI /, "");
+      const message = status === "Connecting" ? "Unavailable" : status;
       return `${providers[provider].model}: ${message}`;
     });
     const notice = get("live-provider-notices");
@@ -333,8 +335,11 @@
       if (!response.ok) return;
       const { providers: configured } = await response.json();
       if (!Array.isArray(configured)) return;
-      configuredFeeds = configured.filter((provider) => provider !== "openai" && Object.hasOwn(providers, provider));
-      if (!lastRun) showProviderRows(configuredFeeds);
+      configuredFeeds = configured.filter((provider) => Object.hasOwn(providers, provider));
+      if (!lastRun) {
+        states.openai.status.textContent = configuredFeeds.includes("openai") ? "Ready" : "API key required";
+        showProviderRows(configuredFeeds);
+      }
     } catch {
       // Static previews can still show the default rows.
     } finally {
@@ -538,7 +543,7 @@
             if (message.type === "error") {
               const code = message.error?.code;
               states.openai.status.textContent = code === "credit_balance_exhausted" || code === "insufficient_quota"
-                ? "OpenAI API credits exhausted"
+                ? "API credits exhausted"
                 : typeof code === "string" && /^[\w-]{1,48}$/.test(code) ? `OpenAI error (${code})` : "OpenAI session error";
               run.failed.add(provider);
               hideFailedEmptyRow(run, provider);
@@ -738,7 +743,7 @@
       }
       if (current !== run) return;
       for (const [provider, error] of Object.entries(payload.errors || {})) {
-        if (states[provider]) states[provider].status.textContent = error;
+        if (states[provider]) states[provider].status.textContent = error === "Set OPENAI_API_KEY in Vercel to connect." ? "API key required" : error;
       }
       if (payload.groqEnabled) {
         run.groq = { buffer: new Uint8Array(groqChunkBytes), length: 0, tail: Promise.resolve() };
@@ -759,7 +764,8 @@
       run.visibleProviders = new Set(activeProviders);
       showProviderRows(run.visibleProviders, run.requestedProviders);
       if (!activeProviders.length) throw new Error("No live provider connected. See the provider status below.");
-      const destination = new Intl.ListFormat("en").format(activeProviders.map((provider) => providers[provider].model));
+      const destination = new Intl.ListFormat("en").format(Object.keys(providers)
+        .filter((provider) => run.visibleProviders.has(provider)).map((provider) => providers[provider].model));
       get("live-status").textContent = mode === "mic"
         ? `Streaming your microphone to ${destination}…`
         : `Playing and streaming the recording at 1× to ${destination}…`;
