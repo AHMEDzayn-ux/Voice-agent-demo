@@ -34,7 +34,12 @@
       label: `${scenarioLabel} · Telephone + ${noise} noise`,
       audio: `assets/${prefix}-phone-${noise}.wav`,
     }))];
-  });
+  }).concat([
+    { id: "urban_fast/original", label: "Fast urban speech · Original", audio: "assets/urban-fast-original.mp4" },
+    { id: "urban_fast/phone_clean", label: "Fast urban speech · Telephone (G.711 A-law)", audio: "assets/urban-fast-phone-clean.wav" },
+    { id: "urban_fast/phone_fan", label: "Fast urban speech · Telephone + fan noise", audio: "assets/urban-fast-phone-fan.wav" },
+    { id: "urban_fast/phone_office", label: "Fast urban speech · Telephone + office noise", audio: "assets/urban-fast-phone-office.wav" },
+  ]);
   let localFile = null;
   let current = null;
   let lastRun = null;

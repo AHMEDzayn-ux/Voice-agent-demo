@@ -7,7 +7,7 @@ A benchmark demo for Sinhala call-center speech recognition. Live test compares 
 1. Choose **Pauses and restarts** or **Sinhala–English code-switching**, then switch between clean audio, G.711 A-law, and 10 dB telephone noise.
 2. Open **Cleanup** to play the 1× replay, scrub the waveform, or expand **Captured streams**. **Show results** jumps to the full outputs.
 3. Compare **Raw**, **Deterministic**, and **LLM cleanup** for either captured provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
-4. The two simulated scenarios load the supplied exact wording automatically. **Live test → Transcript comparison and accuracy** lets you select any provider from the completed run and compare raw, deterministic, and LLM outputs side by side. **Cleanup** offers the same comparison for the two captured providers. Changed and extra words are highlighted, and missing words are struck through. For a microphone recording, paste the reference after the run. Reference edits and glossary rules stay in the browser tab.
+4. The simulated scenarios load the supplied exact wording automatically. **Live test → Transcript comparison and accuracy** lets you select any provider from the completed run and compare raw, deterministic, and LLM outputs side by side. **Cleanup** offers the same comparison for the two captured providers. Changed and extra words are highlighted, and missing words are struck through. For a microphone recording, paste the reference after the run. Reference edits and glossary rules stay in the browser tab.
 5. Open **Benchmarks** for the three-call pilot, **Costs** for the source-linked calculator, and **Deployment** for the Azure region comparison and call-center rollout checks.
 6. Choose **Load real calls** and select the separate private replay file from your computer. The tab loads the recording and captured transcripts locally. Keep the file outside the repository and deployment.
 
@@ -49,6 +49,8 @@ To round-trip a noise mix through the telephone codec, use these commands. The e
 ffmpeg -i public/assets/pause-fan_noise_10db.wav -af "highpass=f=300,highpass=f=300,lowpass=f=3400,lowpass=f=3400" -ar 8000 -ac 1 -c:a pcm_alaw telephone-alaw.wav
 ffmpeg -i telephone-alaw.wav -map_metadata -1 -fflags +bitexact -c:a pcm_s16le public/assets/pause-phone-fan.wav
 ```
+
+**Fast urban speech** in Live test adds a 52.992-second synthetic payment-dispute scenario. Compare the original AAC MP4 with telephone-only, telephone plus fan, and telephone plus office variants. The noisy variants use the same looped backgrounds and 10 dB pre-filter SNR target. All four share the supplied reference, including the spoken NIC correction and synthetic email. Separately verify the final amount, corrected NIC, and email when evaluating field accuracy. WER and CER ignore punctuation.
 
 ## Preview and test
 

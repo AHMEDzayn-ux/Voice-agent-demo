@@ -173,7 +173,7 @@ test("local replay pack imports without adding any provider request", async () =
 });
 
 test("live view shows the OpenAI placeholder without a key and can select a local file", async () => {
-  const { nodes } = initDashboard("", {
+  const { nodes, browser } = initDashboard("", {
     async fetch() { return { ok: true, json: async () => ({ providers: ["deepgram", "gemini"] }) }; },
   });
   nodes["tab-live"].callbacks.click();
@@ -193,7 +193,7 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   const recordings = nodes["live-recording"];
   assert.equal(recordings.children.length, 1);
   assert.equal(recordings.children[0].label, "Simulated recordings");
-  assert.equal(recordings.children[0].children.length, 10);
+  assert.equal(recordings.children[0].children.length, 14);
   assert.equal(recordings.value, "pause_and_talk/clean");
   assert.match(nodes["live-reference"].value, /^සුළු අසනීපයක්/);
   recordings.value = "code_switch/phone_office";
@@ -210,6 +210,20 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
       assert.equal(audio.readUInt16LE(34), 16);
       assert.equal(audio.readUInt32LE(40), frames * 2);
     }
+  }
+  assert.equal(fs.readFileSync(path.join(site, "assets/urban-fast-original.mp4")).toString("ascii", 4, 8), "ftyp");
+  for (const condition of ["original", "phone_clean", "phone_fan", "phone_office"]) {
+    const id = `urban_fast/${condition}`;
+    assert.ok(recordings.children[0].children.some((entry) => entry.value === id));
+    recordings.value = id;
+    recordings.callbacks.change();
+    assert.equal(nodes["live-reference"].value, browser.DEMO_REFERENCES.urban_fast);
+    if (condition === "original") continue;
+    const audio = fs.readFileSync(path.join(site, `assets/urban-fast-phone-${condition.slice(6)}.wav`));
+    assert.equal(audio.toString("ascii", 8, 16), "WAVEfmt ");
+    assert.equal(audio.readUInt16LE(22), 1);
+    assert.equal(audio.readUInt32LE(24), 8000);
+    assert.equal(audio.readUInt32LE(40), 423936 * 2);
   }
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
