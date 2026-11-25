@@ -31,9 +31,10 @@ const instruction = [
 ].join(" ");
 const digitInstruction = [
   'The "text" field is one Sinhala identifier dictated in groups. Convert every group to digits in order and concatenate them.',
-  'Return only ASCII digits, with no other text. Retain existing digit groups exactly, including leading zeros. Ignore punctuation and hesitation sounds.',
+  'Return only ASCII digits, with no other text. Retain standalone digit groups exactly, including leading zeros. Ignore punctuation and hesitation sounds.',
   'A repetition group gives the repeated digit first, then the count. "දෙකේ තුනයි", "දෙකේම තුනයි" and "දෙකෙන් තුනයි" each mean 222. "පහේ හතරයි" means 5555.',
   'Examples: "බින්දුවයි" = 0. "එකසිය තිස් පහයි" and "එකසිය. තිස් පහයි" both mean 135. "322 යි" = 322. "බිංදු දෙකයි" = 00.',
+  'When a spoken thousands or hundreds prefix is followed by a smaller written number, add them as one group. "එක්දාස් හත්සිය 75 යි" means 1000 + 700 + 75, so write 1775. "දෙසිය 41 යි" means 241.',
   'Example: "බින්දුවයි විසි පහයි. ආ බිංදු දෙකයි." = 02500. Return UNCLEAR if any group is unsupported by the text.',
 ].join(" ");
 

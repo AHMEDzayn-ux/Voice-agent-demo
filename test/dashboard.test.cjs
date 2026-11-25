@@ -110,6 +110,10 @@ test("digit dictation groups Sinhala cardinals and repetitions across finalized 
   const spoken = "බින්දුවයි එකසිය. තිස් පහයි. 321 යි. 554 යි. ආ බින්දු දෙකයි. දෙකේම තුනයි. පහේ හතරයි. අ.";
   assert.equal(readDictatedDigits(spoken), "0135321554002225555");
   assert.equal(readDictatedDigits("022551 බිංදු දෙකක්."), "02255100");
+  assert.equal(readDictatedDigits("326 යි. බින්දු දෙකයි. එක්දාස් හත්සිය 75 යි."), "326001775");
+  assert.equal(readDictatedDigits("එක්දාස්. හත්සිය 75 යි."), "1775");
+  assert.equal(readDictatedDigits("දෙදහස් 418 යි. දෙසිය 41 යි."), "2418241");
+  assert.equal(readDictatedDigits("හත්සිය 075 යි"), null);
   assert.equal(readDictatedDigits("බින්දුවයි එකසිය"), null);
   assert.equal(readDictatedDigits("02 ඉතිරිය පැහැදිලි නෑ"), null);
   assert.equal(readDictatedDigits("මුදල 02%"), null);
