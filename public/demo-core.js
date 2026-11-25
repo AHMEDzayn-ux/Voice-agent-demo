@@ -74,6 +74,82 @@
     };
   }
 
+  function diffWords(reference, output) {
+    const tokenize = (text) => [...text.matchAll(/[^\s\p{P}]+/gu)].map((match) => ({
+      text: match[0], start: match.index, normalized: match[0].normalize("NFC").toLowerCase(),
+    }));
+    const expected = tokenize(reference);
+    const actual = tokenize(output);
+    const width = actual.length + 1;
+    const size = (expected.length + 1) * width;
+    if (!expected.length || size > 4000000) return [{ text: output }];
+    const edits = new Uint32Array(size);
+    for (let j = 0; j < width; j++) edits[j] = j;
+    for (let i = 1; i <= expected.length; i++) {
+      const row = i * width;
+      edits[row] = i;
+      for (let j = 1; j < width; j++) {
+        const position = row + j;
+        const change = Number(expected[i - 1].normalized !== actual[j - 1].normalized);
+        edits[position] = Math.min(
+          edits[position - width - 1] + change, edits[position - 1] + 1, edits[position - width] + 1,
+        );
+      }
+    }
+    const alignment = [];
+    const commonPrefix = (left = "", right = "") => {
+      let length = 0;
+      while (length < left.length && left[length] === right[length]) length++;
+      return length;
+    };
+    let i = expected.length;
+    let j = actual.length;
+    while (i || j) {
+      const position = i * width + j;
+      const before = expected[i - 1]?.normalized;
+      const after = actual[j - 1]?.normalized;
+      const exact = before === after;
+      const diagonal = i && j && edits[position] === edits[position - width - 1] + Number(!exact);
+      const omit = i && edits[position] === edits[position - width] + 1;
+      const add = j && edits[position] === edits[position - 1] + 1;
+      // Prefer the closer spelling when equally good word alignments disagree.
+      const prefix = commonPrefix(before, after);
+      const preferOmit = omit && commonPrefix(expected[i - 2]?.normalized, after) > prefix;
+      const preferAdd = add && commonPrefix(before, actual[j - 2]?.normalized) > prefix;
+      if (diagonal && (exact || !preferOmit && !preferAdd)) {
+        const token = actual[--j];
+        const target = expected[--i].text;
+        alignment.push(exact ? token : { ...token, kind: "changed", target });
+      } else if (add && !preferOmit) {
+        alignment.push({ ...actual[--j], kind: "extra" });
+      } else {
+        alignment.push({ text: expected[--i].text, kind: "missing" });
+      }
+    }
+    const pieces = [];
+    let end = 0;
+    const plain = (text) => {
+      if (!text) return;
+      const previous = pieces.at(-1);
+      if (previous && !previous.kind) previous.text += text;
+      else pieces.push({ text });
+    };
+    for (const piece of alignment.reverse()) {
+      if (piece.kind === "missing") {
+        const previous = pieces.at(-1);
+        if (previous?.kind === "missing") previous.text += ` ${piece.text}`;
+        else pieces.push(piece);
+      } else {
+        plain(output.slice(end, piece.start));
+        if (piece.kind) pieces.push(piece);
+        else plain(piece.text);
+        end = piece.start + piece.text.length;
+      }
+    }
+    plain(output.slice(end));
+    return pieces;
+  }
+
   function digitSequences(text) {
     return text.match(/\p{Nd}+/gu) || [];
   }
@@ -145,5 +221,5 @@
     };
   }
 
-  return { elapsed, clean, parseGlossary, score, digitsChanged, observe, estimateCosts };
+  return { elapsed, clean, parseGlossary, score, diffWords, digitsChanged, observe, estimateCosts };
 });

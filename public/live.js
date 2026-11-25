@@ -20,6 +20,8 @@
   const cleanupContextLimit = 480;
   const recordingSelect = get("live-recording");
   const referenceInput = get("live-reference");
+  const reviewPanel = get("live-review");
+  const reviewProvider = get("live-review-provider");
   const localFileId = "local-file";
   const telephoneAssets = { pause_and_talk: "pause", code_switch: "code" };
   const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenario, condition, scenarioLabel, label, audio }) => {
@@ -38,7 +40,7 @@
   let lastRun = null;
   let configuredFeeds;
   let discovering = false;
-  const references = new Map();
+  const references = new Map(Object.entries(window.DEMO_REFERENCES || {}));
   let selectedReference;
 
   const make = (tag, value, classes) => {
@@ -70,16 +72,20 @@
   }
 
   function recordingReferenceKey() {
-    return recordingSelect.value === localFileId ? localFileId : recordingSelect.value.split("/")[0];
+    return recordingSelect.value === localFileId ? localFile : recordingSelect.value.split("/")[0];
   }
 
   function selectReference(key) {
     selectedReference = key;
     referenceInput.value = references.get(key) || "";
+    renderReview();
   }
 
   const states = {};
   for (const [provider, { name, model }] of Object.entries(providers)) {
+    const option = make("option", model);
+    option.value = provider;
+    reviewProvider.append(option);
     const panel = make("article", null, `transcript live-provider ${provider}`);
     panel.hidden = !pinnedFeeds.includes(provider);
     const header = make("header");
@@ -147,6 +153,7 @@
     get("live-feeds").append(panel);
     states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal, accuracy };
   }
+  reviewProvider.value = defaultFeeds[0];
 
   function formatDuration(ms) {
     if (!Number.isFinite(ms)) return "—";
@@ -193,6 +200,48 @@
       : [...parts.values()];
   }
 
+  function llmFragments(parts) {
+    return parts.flatMap((part) => {
+      const corrected = part.batch?.llm.text;
+      if (corrected && part.batch.parts[0] !== part) return [];
+      return [{ text: corrected || part.rules, corrected: Boolean(corrected) }];
+    });
+  }
+
+  function renderReview() {
+    if (!reviewPanel.open) return;
+    const run = lastRun?.referenceKey === selectedReference ? lastRun : null;
+    const provider = reviewProvider.value;
+    const reference = referenceInput.value;
+    const finished = run && run !== current;
+    const complete = finished && states[provider].status.textContent === "Complete" && (!run.playback || run.playback.ended);
+    const parts = finished ? finalizedParts(run, provider) : [];
+    const fragments = run?.llmEnabled ? llmFragments(parts) : [];
+    const pending = run?.llmEnabled && parts.some((part) => part.batch?.llm.requestMs === undefined);
+    const hasCleanup = fragments.some((part) => part.corrected);
+    const raw = !finished ? "" : provider === "openai" ? run.openaiTranscript.text().raw
+      : core.observe(run.events[provider], Infinity).raw;
+    const note = get("live-review-note");
+    note.textContent = !run ? "Run a live test to compare results."
+      : !finished ? "Results are available when the run finishes."
+        : `${run.recordingLabel} · ${complete ? "Complete" : run.playback && !run.playback.ended ? "Playback stopped early" : states[provider].status.textContent}`;
+    const missingCleanup = !run || run.llmEnabled
+      ? pending ? "Cleaning the remaining chunks…" : "No LLM-cleaned text was returned."
+      : "Enable LLM cleanup before starting a test.";
+    const results = {
+      raw, rules: parts.map((part) => part.rules).join(" "),
+      llm: hasCleanup && !pending ? fragments.map((part) => part.text).join(" ") : "",
+    };
+    for (const [stage, text] of Object.entries(results)) {
+      const id = `live-review-${stage}`;
+      const placeholder = !finished ? "Waiting for a completed run." : stage === "llm" ? missingCleanup : "No finalized transcript.";
+      readOutput(id, text, placeholder, complete ? reference : "");
+      const label = text ? scoreLabel(reference, complete ? core.score(reference, text) : null, complete) : "";
+      const fallback = stage === "llm" && text && fragments.some((part) => !part.corrected);
+      get(`${id}-score`).textContent = fallback ? `${label} · Includes deterministic fallback` : label;
+    }
+  }
+
   function render(run, provider) {
     const ui = states[provider];
     const observed = core.observe(run.events[provider], Infinity);
@@ -209,10 +258,7 @@
     let scoredText = "";
     if (stage === "llm" && run.llmEnabled && (parts.length || interim)) {
       let hasText = false;
-      for (const part of parts) {
-        const corrected = part.batch?.llm.text;
-        if (corrected && part.batch.parts[0] !== part) continue;
-        const text = corrected || part.rules;
+      for (const { text, corrected } of llmFragments(parts)) {
         if (!text) continue;
         fallbackVisible ||= !corrected;
         ui.transcript.append(make("span", `${hasText ? " " : ""}${text}`, corrected ? null : "waiting"));
@@ -241,7 +287,7 @@
     }
     const reference = references.get(run.referenceKey);
     const cleanupPending = stage === "llm" && parts.some((part) => part.batch?.llm.requestMs === undefined);
-    const score = reference && scoredText && ui.status.textContent === "Complete" && !cleanupPending
+    const score = reference && scoredText && ui.status.textContent === "Complete" && !cleanupPending && (!run.playback || run.playback.ended)
       ? core.score(reference, scoredText) : null;
     ui.accuracy.hidden = !score;
     ui.accuracy.textContent = score
@@ -317,7 +363,10 @@
     llm.requestMs = end - start;
     llm.totalMs = end - run.started;
     pipeline.active = false;
-    if (lastRun === run && !run.cleanupController.signal.aborted) render(run, provider);
+    if (lastRun === run && !run.cleanupController.signal.aborted) {
+      render(run, provider);
+      if (current !== run && reviewProvider.value === provider) renderReview();
+    }
     if (pipeline.pending.length) void requestCleanup(run, provider);
   }
 
@@ -424,6 +473,7 @@
     }
     get("live-status").textContent = text;
     setBusy(false);
+    renderReview();
   }
 
   function receiveTranscripts(run, provider, events, message) {
@@ -753,6 +803,7 @@
       pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
       cleanupRequests: new Map(),
       referenceKey: mode === "mic" ? "microphone" : recordingReferenceKey(),
+      recordingLabel: mode === "mic" ? "Microphone recording" : file?.name || clip.label,
     };
     current = lastRun = run;
     selectReference(run.referenceKey);
@@ -866,19 +917,22 @@
       get("live-status").textContent = "Choose an audio file no larger than 20 MB.";
       return;
     }
+    if (localFile) references.delete(localFile);
     localFile = file;
-    references.delete(localFileId);
     refreshRecordings(localFileId);
     selectReference(recordingReferenceKey());
     get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
+  reviewPanel.addEventListener("toggle", renderReview);
+  reviewProvider.addEventListener("change", renderReview);
   recordingSelect.addEventListener("change", () => selectReference(recordingReferenceKey()));
   referenceInput.addEventListener("input", () => {
     references.set(selectedReference, referenceInput.value.trim());
     if (lastRun?.referenceKey === selectedReference) {
       for (const provider of Object.keys(states)) render(lastRun, provider);
     }
+    renderReview();
   });
   get("live-stage").addEventListener("change", () => {
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);

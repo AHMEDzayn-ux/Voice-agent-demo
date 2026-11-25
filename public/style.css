@@ -141,12 +141,11 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .options { background: #ecf1e6; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; flex: 1; margin-top: 23px; }
 .options summary { font-weight: 730; padding-block: 2px; }
 .options-grid, .cost-inputs { display: grid; gap: 12px; margin-top: 13px; }
-.options-grid { grid-template-columns: 1fr 1fr; }
 .options textarea { display: block; width: 100%; margin-top: 4px; resize: vertical; line-height: 1.5; }
 .options p { color: var(--muted); font-size: .875rem; margin: 5px 0 0; }
 #glossary-error:not(:empty), .guard { color: #882e36; }
-.swipe-note { display: none; }
-.cleanup-grid, .decision-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.review-grid, .decision-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.review-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .stage, .decision-card { border: 1px solid var(--line); background: #fbfcf5; border-radius: 10px; padding: 11px 12px; min-width: 0; }
 .stage h3, .decision-card h3 { margin: 0 0 4px; letter-spacing: -.04em; }
 .stage-meta, .stage-score, .guard, .section-note { margin: 0; color: var(--muted); font-size: .875rem; }
@@ -154,6 +153,13 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
   font-family: "Noto Sans Sinhala", "Iskoola Pota", "Segoe UI", sans-serif;
 }
 .stage-score { font-weight: 700; }
+.stage-output.review-reference { display: block; width: 100%; resize: vertical; padding-inline: 7px; font-size: inherit; }
+.stage-output:has(> .waiting:only-child) { height: auto; min-height: 3rem; }
+.review-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 6px 14px; }
+.review-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; color: var(--muted); font-size: .875rem; }
+.review-toolbar + .stage-meta { margin: 6px 0; }
+.diff-changed, .diff-extra { background: #ffe1d7; color: #792718; }
+.diff-missing { background: #fff1be; color: #604400; margin-inline: .16em; }
 .guard:not(:empty) { margin-top: 6px; }
 .section-note { margin-top: 10px; line-height: 1.55; }
 .decision-card p { color: var(--muted); margin: 0; line-height: 1.55; }
@@ -170,8 +176,6 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .evidence-table a { color: var(--green); }
 .evidence-heading { margin: 14px 0 0; font-size: 1rem; }
 .live-reference { margin-top: 8px; }
-.live-reference label { display: block; margin-bottom: 5px; font-size: .875rem; }
-.live-reference textarea { width: min(100%, 680px); min-height: 72px; resize: vertical; }
 .live-accuracy { font-variant-numeric: tabular-nums; font-weight: 700; }
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); border: 1px solid var(--line); border-radius: 14px; background: #fbfcf5; }
 .metric { padding: 12px 14px; }
@@ -198,6 +202,7 @@ tr :first-child { text-align: left; }
 .method dt { font-weight: 760; }
 .method dd { margin: 4px 0 0; color: var(--muted); line-height: 1.55; }
 @media (max-width: 740px) {
+  .review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-feeds .live-provider { grid-template-columns: minmax(0, 1fr); gap: 5px; }
   .live-feeds .live-provider > header { display: flex; flex-direction: row; align-items: baseline; justify-content: space-between; min-height: 0; }
   .live-provider > header div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 7px; }
@@ -227,13 +232,11 @@ tr :first-child { text-align: left; }
   .transcript-body { max-height: clamp(8rem, 23dvh, 12rem); }
   .cleanup-toolbar { flex-direction: column; align-items: stretch; gap: 5px; }
   .options { margin-top: 0; }
-  .options-grid, .decision-grid, .method dl { grid-template-columns: 1fr; }
+  .decision-grid, .method dl { grid-template-columns: 1fr; }
   .cost-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .swipe-note { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 6px; }
-  .cleanup-grid { grid-template-columns: none; grid-auto-columns: min(79%, 290px); grid-auto-flow: column; overflow-x: auto; scroll-snap-type: x proximity; padding: 2px 2px 4px; }
-  .stage { scroll-snap-align: start; }
 }
 @media (max-width: 560px) {
+  .review-grid { grid-template-columns: minmax(0, 1fr); }
   .masthead-inner { align-items: stretch; flex-direction: column; gap: 5px; padding-block: 6px; }
   .view-tabs button { flex: 1 1 auto; padding-inline: 5px; }
   .view-tabs { flex-wrap: wrap; }

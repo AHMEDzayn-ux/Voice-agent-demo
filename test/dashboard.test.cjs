@@ -17,10 +17,13 @@ const html = load("index.html");
 
 function initDashboard(initialHash = "", runtime = {}) {
   function node() {
+    let text = "";
     return {
-      children: [], callbacks: {}, style: {}, textContent: "", value: "", clientWidth: 420, clientHeight: 54,
+      children: [], callbacks: {}, style: {}, value: "", clientWidth: 420, clientHeight: 54,
+      get textContent() { return this.children.length ? this.children.map((child) => child.textContent).join("") : text; },
+      set textContent(value) { this.children = []; text = value; },
       append(...items) { this.children.push(...items); },
-      replaceChildren(...items) { this.children = items; },
+      replaceChildren(...items) { this.children = items; text = ""; },
       addEventListener(name, callback) { this.callbacks[name] = callback; },
       setAttribute(name, value) { this[name] = value; },
       focus() { this.focused = true; },
@@ -61,10 +64,16 @@ function initDashboard(initialHash = "", runtime = {}) {
   };
   browser.window = browser;
   const sandbox = vm.createContext(browser);
-  for (const file of ["assets/demo-data.js", "demo-core.js", "live-wire.js", "live-azure.js", "app.js", "live.js"]) {
+  for (const file of ["assets/demo-data.js", "assets/references.js", "demo-core.js", "live-wire.js", "live-azure.js", "app.js", "live.js"]) {
     vm.runInContext(load(file), sandbox, { filename: file });
   }
   return { nodes, data: browser.DEMO_DATA, browser };
+}
+
+function transcriptText(node) {
+  return node.children.length
+    ? node.children.filter((word) => word.className !== "diff-missing").map((word) => word.textContent).join("")
+    : node.textContent;
 }
 
 test("Unicode rules, literal approved terms, and numeric guard", () => {
@@ -186,6 +195,10 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   assert.equal(recordings.children[0].label, "Simulated recordings");
   assert.equal(recordings.children[0].children.length, 10);
   assert.equal(recordings.value, "pause_and_talk/clean");
+  assert.match(nodes["live-reference"].value, /^සුළු අසනීපයක්/);
+  recordings.value = "code_switch/phone_office";
+  recordings.callbacks.change();
+  assert.match(nodes["live-reference"].value, /^මම වැඩියෙන්ම අන්තර්ජාලය/);
   for (const [scenario, prefix, frames] of [["pause_and_talk", "pause", 225792], ["code_switch", "code", 240480]]) {
     for (const condition of ["fan", "office"]) {
       const option = recordings.children[0].children.find((entry) => entry.value === `${scenario}/phone_${condition}`);
@@ -505,6 +518,8 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "azure", "openai", "groq"]);
   assert.match(readyRows.at(-1).children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
+  nodes["live-review"].open = true;
+  nodes["live-review"].callbacks.toggle();
   nodes["live-recording"].value = "code_switch/phone_fan";
   nodes["live-recording"].callbacks.change();
   nodes["live-reference"].value = `${final} ${final} ${short}`;
@@ -592,6 +607,14 @@ test("recording automatically streams to configured providers and shares identic
   const deepgramAccuracy = readyRows[0].children[1].children[3];
   assert.equal(deepgramAccuracy.hidden, false);
   assert.equal(deepgramAccuracy.textContent, "WER 0.0% · CER 0.0%");
+  assert.equal(nodes["live-review-raw-score"].textContent, "CER 0.0% · WER 0.0%");
+  assert.equal(nodes["live-review-llm-score"].textContent, "CER 0.0% · WER 0.0%");
+  nodes["live-review-provider"].value = "azure";
+  nodes["live-review-provider"].callbacks.change();
+  assert.equal(transcriptText(nodes["live-review-raw"]), final);
+  assert.equal(transcriptText(nodes["live-review-llm"]), `${final}.`);
+  assert.ok(nodes["live-review-raw"].children.some((word) => word.className === "diff-missing"));
+  assert.ok(nodes["live-review-llm"].children.some((word) => word.className === "diff-missing"));
   for (const panel of nodes["live-feeds"].children) {
     const [transcript, timing, note] = panel.children[1].children;
     const [, details] = panel.children[2].children;
@@ -812,7 +835,8 @@ test("Show results pauses and reveals both transcripts and captured cleanup", as
   assert.equal(nodes.position.value, nodes.position.max);
   assert.match(nodes["deepgram-status"].textContent, /captured/i);
   assert.match(nodes["gemini-status"].textContent, /captured/i);
-  assert.equal(nodes["llm-output"].textContent, data.clips[0].cleanup.deepgram.text);
+  assert.equal(transcriptText(nodes["llm-output"]), data.clips[0].cleanup.deepgram.text);
+  assert.ok(nodes["llm-output"].children.some((word) => word.className?.startsWith("diff-")));
   assert.equal(nodes["deepgram-text"].scrollTop, 0);
   nodes.audio.callbacks.ended();
   assert.equal(nodes.position.value, nodes.position.max);
@@ -825,6 +849,19 @@ test("accuracy uses edits and ignores cosmetic formatting", () => {
   assert.equal(core.score("one", "one two three").wer, 2);
   assert.equal(core.score("\u0dc3\u0dd2\u0d82\u0dc4\u0dbd", "\u0dc3\u0dd2\u0d82\u0dc4\u0dbd").cer, 0);
   assert.equal(core.score("...", "hello"), null);
+});
+
+test("word highlights align substitutions, insertions and omissions without changing the output", () => {
+  const reference = "One, absent stay two anchor last!";
+  const output = "ONE stay too anchor added last.";
+  const pieces = core.diffWords(reference, output);
+  assert.deepEqual(pieces.filter((piece) => piece.kind).map(({ kind, text, target }) => [kind, text, target]), [
+    ["missing", "absent", undefined], ["changed", "too", "two"], ["extra", "added", undefined],
+  ]);
+  assert.equal(pieces.filter((piece) => piece.kind !== "missing").map((piece) => piece.text).join(""), output);
+  assert.deepEqual(core.diffWords("Hello, world!", " hello WORLD "), [{ text: " hello WORLD " }]);
+  assert.deepEqual(core.diffWords("නිදහස් සෞඛ්‍ය පහසුකම්", "නිදහස පහසුකම්").filter((piece) => piece.kind)
+    .map(({ kind, text, target }) => [kind, text, target]), [["changed", "නිදහස", "නිදහස්"], ["missing", "සෞඛ්‍ය", undefined]]);
 });
 
 test("first text, Sinhala script, interim and final come from the replay clock", () => {
@@ -866,17 +903,17 @@ test("dashboard plays, updates metrics, scores complete stages and keeps referen
   nodes.position.value = "20";
   nodes.position.callbacks.input();
   assert.ok(nodes["deepgram-interims"].textContent > 0);
-  assert.equal(nodes["llm-output"].textContent, "");
+  assert.match(nodes["llm-output"].textContent, /full transcript/);
   nodes.reference.value = clip.raw.deepgram;
   nodes.reference.callbacks.input();
   assert.match(nodes["raw-score"].textContent, /complete/);
   nodes.position.value = nodes.position.max;
   nodes.position.callbacks.input();
   assert.equal(nodes["raw-score"].textContent, "CER 0.0% \u00b7 WER 0.0%");
-  assert.equal(nodes["llm-output"].textContent, clip.cleanup.deepgram.text);
+  assert.equal(transcriptText(nodes["llm-output"]), clip.cleanup.deepgram.text);
   nodes["cleanup-provider"].value = "gemini";
   nodes["cleanup-provider"].callbacks.change();
-  assert.equal(nodes["llm-output"].textContent, clip.cleanup.gemini.text);
+  assert.equal(transcriptText(nodes["llm-output"]), clip.cleanup.gemini.text);
   nodes.restart.callbacks.click();
   assert.equal(nodes.audio.currentTime, 0);
   assert.equal(nodes["deepgram-arrival"].textContent, "\u2014");
@@ -886,5 +923,5 @@ test("dashboard plays, updates metrics, scores complete stages and keeps referen
   nodes.scenario.value = "code_switch";
   nodes.scenario.callbacks.change();
   assert.match(nodes.audio.src, /code-g711_alaw/);
-  assert.equal(nodes.reference.value, "");
+  assert.match(nodes.reference.value, /^මම වැඩියෙන්ම අන්තර්ජාලය/);
 });

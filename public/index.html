@@ -8,6 +8,7 @@
   <title>Sinhala streaming STT benchmark</title>
   <link rel="stylesheet" href="style.css">
   <script src="assets/demo-data.js" defer></script>
+  <script src="assets/references.js" defer></script>
   <script src="demo-core.js" defer></script>
   <script src="live-wire.js" defer></script>
   <script src="live-azure.js" defer></script>
@@ -85,11 +86,19 @@
       </div>
       <p id="live-provider-notices" role="status" class="live-provider-notices" hidden></p>
       <div id="live-feeds" class="live-feeds"></div>
-      <details class="per-call live-reference">
-        <summary>Accuracy reference</summary>
-        <label for="live-reference">Exact transcript for this recording or mic test</label>
-        <textarea id="live-reference" rows="4" maxlength="12000" placeholder="Paste what was actually spoken, including English words and numbers."></textarea>
-        <p class="section-note">Use the same reference across noise variants of a clip. For a mic test, paste it after the run. Word and character error rates are calculated in your browser.</p>
+      <details id="live-review" class="per-call live-reference">
+        <summary>Transcript comparison and accuracy</summary>
+        <div class="review-toolbar">
+          <div class="local-select"><label for="live-review-provider">Transcription model</label><select id="live-review-provider"></select></div>
+          <p class="review-legend"><mark class="diff-changed">Changed or extra words</mark> <del class="diff-missing">Missing words</del></p>
+        </div>
+        <p id="live-review-note" class="stage-meta" role="status">Run a live test to compare results.</p>
+        <div class="review-grid" role="region" aria-label="Live transcripts compared with the exact transcript">
+          <article class="stage"><h3><label for="live-reference">Exact transcript</label></h3><textarea class="stage-output review-reference" id="live-reference" lang="si" maxlength="12000" placeholder="Paste the exact wording. For a mic test, paste it after the run."></textarea></article>
+          <article class="stage"><h3>Raw</h3><div id="live-review-raw" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-raw-score" class="stage-score"></p></article>
+          <article class="stage"><h3>Deterministic</h3><div id="live-review-rules" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-rules-score" class="stage-score"></p></article>
+          <article class="stage"><h3>LLM cleanup</h3><div id="live-review-llm" class="stage-output" lang="si" tabindex="0"></div><p id="live-review-llm-score" class="stage-score"></p></article>
+        </div>
       </details>
     </section>
 
@@ -97,16 +106,16 @@
       <div class="cleanup-toolbar">
         <div class="local-select"><label for="cleanup-provider">Transcription provider</label><select id="cleanup-provider"><option value="deepgram">Deepgram Nova-3</option><option value="gemini">Gemini 3.8 Live</option></select></div>
         <details class="options">
-          <summary>Score with a reference or add glossary rules</summary>
+          <summary>Glossary rules</summary>
           <div class="options-grid">
-            <div><label for="reference">Verified transcript for the selected scenario</label><textarea id="reference" maxlength="4000" rows="4" placeholder="Paste a human-verified transcript to score CER and WER"></textarea><p>Scoring runs in this browser. The same reference applies across noise conditions.</p></div>
             <div><label for="glossary">Approved term replacements</label><textarea id="glossary" maxlength="1500" rows="4" placeholder="heard term => approved term"></textarea><p>One rule per line. The rules also normalize Unicode and whitespace.</p></div>
           </div>
           <p id="glossary-error" role="status"></p>
         </details>
       </div>
-      <p class="swipe-note">Swipe across to compare all three outputs.</p>
-      <div class="cleanup-grid" role="region" aria-label="Raw, deterministic, and LLM outputs" tabindex="0">
+      <p class="review-legend"><mark class="diff-changed">Changed or extra words</mark> <del class="diff-missing">Missing words</del></p>
+      <div class="review-grid" role="region" aria-label="Captured transcripts compared with the exact transcript">
+        <article class="stage"><h3><label for="reference">Exact transcript</label></h3><p class="stage-meta">Shared across noise conditions</p><textarea class="stage-output review-reference" id="reference" lang="si" maxlength="4000" placeholder="Paste a human-verified transcript to score CER and WER"></textarea></article>
         <article class="stage"><h3>Raw</h3><p class="stage-meta">From the streaming provider</p><div id="raw-output" class="stage-output" lang="si" tabindex="0"></div><p id="raw-score" class="stage-score"></p></article>
         <article class="stage"><h3>Deterministic</h3><p class="stage-meta" id="rules-meta">Runs in your browser</p><div id="rules-output" class="stage-output" lang="si" tabindex="0"></div><p id="rules-score" class="stage-score"></p><p id="rules-guard" class="guard"></p></article>
         <article class="stage"><h3>LLM cleanup</h3><p class="stage-meta" id="llm-meta">Captured Gemini Flash-Lite request</p><div id="llm-output" class="stage-output" lang="si" tabindex="0"></div><p id="llm-score" class="stage-score"></p><p id="llm-guard" class="guard"></p></article>
@@ -240,7 +249,7 @@
           <thead><tr><th scope="col">Decision</th><th scope="col">Compare on the same calls</th><th scope="col">Evidence</th></tr></thead>
           <tbody>
             <tr><th scope="row">Latency and turn taking</th><td>Track first visible text, speech-end to final text, and p50/p95. Keep audio, language and segmentation settings fixed for the Azure region comparison. Include the time Groq spends filling each chunk.</td><td><a href="#live">Live test</a></td></tr>
-            <tr><th scope="row">Accuracy and cleanup</th><td>Use exact human transcripts to score raw, deterministic, and LLM outputs. Check Sinhala–English switching, names and numbers separately.</td><td><a href="#live">Live accuracy reference</a></td></tr>
+            <tr><th scope="row">Accuracy and cleanup</th><td>Use exact human transcripts to score raw, deterministic, and LLM outputs. Check Sinhala–English switching, names and numbers separately.</td><td><a href="#live">Live transcript comparison</a></td></tr>
             <tr><th scope="row">Call-center load</th><td>Repeat at expected peak concurrency and record dropouts, incomplete transcripts, and quota errors.</td><td><a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits">Azure quotas</a></td></tr>
             <tr><th scope="row">Hetzner self-hosting</th><td>Hetzner quotes server rental and setup fees. Use a current server quote and benchmark the model’s latency and concurrent calls per server before costing self-hosted speech recognition.</td><td><a href="https://www.hetzner.com/dedicated-rootserver/gex45/">Hetzner GPU configurator</a></td></tr>
           </tbody>

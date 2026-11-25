@@ -9,7 +9,7 @@ const audio = el("audio");
 const canvas = el("wave");
 const slider = el("position");
 const shown = new Map();
-const references = new Map();
+const references = new Map(Object.entries(window.DEMO_REFERENCES || {}));
 const core = window.BenchmarkCore;
 let clip;
 let timelineEnd = 0;
@@ -100,10 +100,20 @@ function showPlaceholder(box, text) {
   box.replaceChildren(placeholder);
 }
 
-function readOutput(id, text, placeholder) {
+function readOutput(id, text, placeholder, reference = "") {
   const box = el(id);
-  if (text) box.textContent = text;
-  else showPlaceholder(box, placeholder);
+  if (!text) return showPlaceholder(box, placeholder);
+  const pieces = reference ? core.diffWords(reference, text) : [{ text }];
+  if (pieces.length === 1 && !pieces[0].kind) {
+    box.textContent = pieces[0].text;
+    return;
+  }
+  box.replaceChildren(...pieces.map(({ text, kind, target }) => {
+    if (!kind) return element("span", text);
+    const word = element(kind === "missing" ? "del" : "mark", text, `diff-${kind}`);
+    word.title = kind === "missing" ? "Missing from this transcript" : kind === "extra" ? "Extra word" : `Expected ${target}`;
+    return word;
+  }));
 }
 
 function scoreLabel(reference, result, ready) {
@@ -128,12 +138,12 @@ function updateLab(time, force = false) {
   const elapsedMs = performance.now() - started;
   const reference = el("reference").value;
   const llm = llmReady ? captured.text : "";
-  readOutput("raw-output", raw, "Waiting for finalized text…");
-  readOutput("rules-output", cleaned, "Waiting for finalized text…");
+  readOutput("raw-output", raw, "Waiting for finalized text…", finished ? reference : "");
+  readOutput("rules-output", cleaned, "Waiting for finalized text…", finished ? reference : "");
   let waiting = "Available after the full transcript and captured cleanup delay.";
   if (finished && captured?.error) waiting = `Cleanup was unavailable in this run (${captured.error}).`;
   else if (finished && !captured) waiting = "Cleanup was unavailable for this stream.";
-  readOutput("llm-output", llm, waiting);
+  readOutput("llm-output", llm, waiting, reference);
   el("rules-meta").textContent = raw
     ? `Local rules · ${elapsedMs < 0.1 ? "<0.1" : elapsedMs.toFixed(1)} ms`
     : "Runs in your browser";
