@@ -21,14 +21,17 @@
   const recordingSelect = get("live-recording");
   const referenceInput = get("live-reference");
   const localFileId = "local-file";
-  const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, condition, scenarioLabel, label, audio }) => {
+  const telephoneAssets = { pause_and_talk: "pause", code_switch: "code" };
+  const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, scenario, condition, scenarioLabel, label, audio }) => {
     const conditionLabel = condition === "g711_alaw" ? "Telephone (G.711 A-law)" : label;
     const clip = { id, label: `${scenarioLabel} · ${conditionLabel}`, audio };
-    if (id !== "pause_and_talk/g711_alaw") return [clip];
-    return [clip,
-      { id: "pause_and_talk/phone_fan", label: `${scenarioLabel} · Telephone + fan noise`, audio: "assets/pause-phone-fan.wav" },
-      { id: "pause_and_talk/phone_office", label: `${scenarioLabel} · Telephone + office noise`, audio: "assets/pause-phone-office.wav" },
-    ];
+    const prefix = telephoneAssets[scenario];
+    if (condition !== "g711_alaw" || !prefix) return [clip];
+    return [clip, ...["fan", "office"].map((noise) => ({
+      id: `${scenario}/phone_${noise}`,
+      label: `${scenarioLabel} · Telephone + ${noise} noise`,
+      audio: `assets/${prefix}-phone-${noise}.wav`,
+    }))];
   });
   let localFile = null;
   let current = null;

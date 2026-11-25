@@ -184,16 +184,19 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   const recordings = nodes["live-recording"];
   assert.equal(recordings.children.length, 1);
   assert.equal(recordings.children[0].label, "Simulated recordings");
-  assert.equal(recordings.children[0].children.length, 8);
+  assert.equal(recordings.children[0].children.length, 10);
   assert.equal(recordings.value, "pause_and_talk/clean");
-  for (const condition of ["fan", "office"]) {
-    const option = recordings.children[0].children.find((entry) => entry.value === `pause_and_talk/phone_${condition}`);
-    assert.match(option.textContent, new RegExp(`Telephone \\+ ${condition} noise`));
-    const audio = fs.readFileSync(path.join(site, `assets/pause-phone-${condition}.wav`));
-    assert.equal(audio.toString("ascii", 8, 16), "WAVEfmt ");
-    assert.equal(audio.readUInt16LE(22), 1);
-    assert.equal(audio.readUInt32LE(24), 8000);
-    assert.equal(audio.readUInt16LE(34), 16);
+  for (const [scenario, prefix, frames] of [["pause_and_talk", "pause", 225792], ["code_switch", "code", 240480]]) {
+    for (const condition of ["fan", "office"]) {
+      const option = recordings.children[0].children.find((entry) => entry.value === `${scenario}/phone_${condition}`);
+      assert.match(option.textContent, new RegExp(`Telephone \\+ ${condition} noise`));
+      const audio = fs.readFileSync(path.join(site, `assets/${prefix}-phone-${condition}.wav`));
+      assert.equal(audio.toString("ascii", 8, 16), "WAVEfmt ");
+      assert.equal(audio.readUInt16LE(22), 1);
+      assert.equal(audio.readUInt32LE(24), 8000);
+      assert.equal(audio.readUInt16LE(34), 16);
+      assert.equal(audio.readUInt32LE(40), frames * 2);
+    }
   }
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
@@ -452,7 +455,7 @@ test("recording automatically streams to configured providers and shares identic
   const requested = [];
   const cleanupBodies = [];
   let releaseSecondCleanup;
-  const audio = "assets/pause-phone-fan.wav";
+  const audio = "assets/code-phone-fan.wav";
   const { nodes } = initDashboard("#live", {
     URL, btoa, WebSocket: Socket, AudioContext: TestAudioContext, OfflineAudioContext: TestOfflineAudioContext, AbortController, SpeechSDK,
     performance: { now: () => wallTime },
@@ -502,7 +505,7 @@ test("recording automatically streams to configured providers and shares identic
   assert.deepEqual(readyRows.map((panel) => panel.className.split(" ").at(-1)), ["deepgram", "gemini", "azure", "openai", "groq"]);
   assert.match(readyRows.at(-1).children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
-  nodes["live-recording"].value = "pause_and_talk/phone_fan";
+  nodes["live-recording"].value = "code_switch/phone_fan";
   nodes["live-recording"].callbacks.change();
   nodes["live-reference"].value = `${final} ${final} ${short}`;
   nodes["live-reference"].callbacks.input();
