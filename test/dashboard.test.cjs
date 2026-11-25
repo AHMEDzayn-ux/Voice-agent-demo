@@ -951,6 +951,7 @@ test("session endpoint lists configured providers without minting tokens and sta
     }
     assert.equal(setup.uses, 1);
     assert.equal(setup.bidiGenerateContentSetup.inputAudioTranscription.languageCodes[0], "si");
+    assert.match(setup.bidiGenerateContentSetup.systemInstruction.parts[0].text, /බිංදු දෙකයි.*00.*බිංදුව, දෙක.*02/);
     return { ok: true, json: async () => ({ name: "auth_tokens/test-only" }) };
   });
   const makeResponse = () => ({
@@ -976,6 +977,9 @@ test("session endpoint lists configured providers without minting tokens and sta
   await liveSession({ method: "POST" }, onlyGemini);
   assert.equal(onlyGemini.code, 200);
   assert.deepEqual(onlyGemini.body.tokens, { gemini: "auth_tokens/test-only" });
+  const tokenSetup = JSON.parse(fetch.mock.calls[0].arguments[1].body).bidiGenerateContentSetup;
+  const socketSetup = wire.connection("gemini", onlyGemini.body.tokens.gemini, onlyGemini.body.geminiSetup).setup;
+  assert.deepEqual(JSON.parse(socketSetup).setup, tokenSetup);
   assert.match(onlyGemini.body.errors.openai, /Set OPENAI_API_KEY/);
   assert.match(onlyGemini.body.errors.deepgram, /Set DEEPGRAM_API_KEY/);
   assert.equal(fetch.mock.callCount(), 1);

@@ -3,6 +3,12 @@
 const geminiSetup = {
   model: "models/gemini-3.8-live",
   generationConfig: { responseModalities: ["AUDIO"] },
+  systemInstruction: { parts: [{ text: [
+    "Transcribe Sri Lankan Sinhala speech, including English words as spoken. Listen silently and preserve the caller's wording.",
+    "For a clearly dictated account number, phone number, or code, write its spoken number groups as digits in order. Join them as one identifier, keeping leading zeros and any spoken letters.",
+    'Examples: "බිංදු දෙකයි" gives 00. "බිංදුව, දෙක" gives 02. "එකසිය තිස් පහයි" gives 135. "තුන්සිය විසි දෙකයි" gives 322. "දෙකේම තුනයි" gives 222. "පහේ හතරයි" gives 5555.',
+    "Use only the groups audible in the caller's speech. Preserve pauses and words around the identifier, keep spoken self-corrections, and leave unclear groups in words where possible.",
+  ].join(" ") }] },
   inputAudioTranscription: { languageCodes: ["si"] },
   realtimeInputConfig: { automaticActivityDetection: { silenceDurationMs: 400 } },
 };
