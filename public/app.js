@@ -363,10 +363,103 @@ function renderMetrics(data) {
   }
 }
 
+function renderIntentPilot(pilot) {
+  if (!pilot?.cases?.length) return;
+  const modelNames = {
+    deepgram: "Deepgram Nova-3", gemini: "Gemini Live", azure: "Azure Speech",
+    openai: "GPT Live Transcribe", groq: "Groq Whisper",
+  };
+  const recovered = (result) => Object.values(result.details || {}).filter((field) => field.correct).length;
+  const firstText = (result) => latency(Number.isFinite(result.firstSeconds) ? result.firstSeconds * 1000 : null);
+  const scenario = el("intent-case");
+
+  function showEvidence() {
+    const picked = pilot.cases.find((entry) => entry.id === scenario.value);
+    const player = el("intent-audio");
+    player.src = picked.audio;
+    el("intent-expected").textContent = `Caller’s goal · ${picked.goal}`;
+    const body = el("intent-rows");
+    body.replaceChildren();
+    for (const result of picked.results) {
+      const row = element("tr", null);
+      const heading = element("th", modelNames[result.provider]);
+      heading.scope = "row";
+      const tested = typeof result.intentCorrect === "boolean";
+      const verdict = tested ? result.intentCorrect ? "Yes" : "Missed" : "Unavailable";
+      row.append(heading, element("td", verdict),
+        element("td", tested ? `${recovered(result)}/${picked.fields.length}` : "—"),
+        element("td", firstText(result)));
+      const evidence = element("td", null);
+      if (tested) {
+        const checks = element("details", null);
+        checks.append(element("summary", result.summary || "Field checks"));
+        if (!result.intentCorrect) {
+          const message = result.detectedGoal === "no clear goal" ? "The agent found no clear goal." : `The agent chose ${result.detectedGoal}.`;
+          checks.append(element("p", message, "stage-meta"));
+        }
+        const fields = element("ul", null, "pilot-evidence-list");
+        for (const field of picked.fields) {
+          const check = result.details[field.id];
+          const item = element("li", `${check.correct ? "Recovered" : "Missed"} · ${field.label}`, check.correct ? null : "missed");
+          if (typeof check.expected === "string") {
+            item.append(element("small", `Expected ${check.expected} · Agent read ${check.actual ?? "nothing clear"}`));
+          }
+          fields.append(item);
+        }
+        checks.append(fields);
+        const transcript = element("details", null);
+        const raw = element("p", result.transcript, "pilot-raw");
+        raw.lang = "si";
+        transcript.append(element("summary", "Raw transcript"), raw);
+        checks.append(transcript);
+        evidence.append(checks);
+      } else {
+        evidence.textContent = result.status;
+      }
+      row.append(evidence);
+      body.append(row);
+    }
+  }
+
+  for (const entry of pilot.cases) {
+    const option = element("option", entry.label);
+    option.value = entry.id;
+    scenario.append(option);
+    const row = element("tr", null);
+    const heading = element("th", null);
+    heading.scope = "row";
+    const link = element("button", entry.label, "pilot-case-link");
+    link.type = "button";
+    link.addEventListener("click", () => {
+      scenario.value = entry.id;
+      const panel = el("intent-evidence");
+      panel.open = true;
+      showEvidence();
+      panel.scrollIntoView?.({ block: "nearest" });
+    });
+    heading.append(link);
+    const eligible = entry.results.filter((result) => result.intentCorrect);
+    const mostDetails = Math.max(0, ...eligible.map(recovered));
+    const leaders = eligible.filter((result) => recovered(result) === mostDetails);
+    const best = element("td", null);
+    const noLeaders = entry.results.some((result) => result.intentCorrect === false) ? "Goal missed" : "No scored results";
+    best.append(element("strong", leaders.length ? leaders.map((result) => modelNames[result.provider]).join(", ") : noLeaders));
+    if (leaders.length) best.append(element("small", `Goal understood · ${mostDetails}/${entry.fields.length} details`));
+    if (entry.finding) best.append(element("small", entry.finding));
+    const fastest = entry.results.filter((result) => typeof result.intentCorrect === "boolean" && Number.isFinite(result.firstSeconds))
+      .sort((a, b) => a.firstSeconds - b.firstSeconds)[0];
+    row.append(heading, best, element("td", fastest ? `${modelNames[fastest.provider]} · ${firstText(fastest)}` : "—"));
+    el("intent-summary").append(row);
+  }
+  scenario.value = pilot.cases[0].id;
+  scenario.addEventListener("change", showEvidence);
+  showEvidence();
+  el("intent-method").textContent = pilot.method;
+}
+
 const costFields = {
-  callerMinutes: "minutes", callSeconds: "call-seconds", replyMinutes: "reply-minutes",
-  liveTextIn: "live-text-in", liveTextOut: "live-text-out",
-  requests: "cleanup-requests", cleanupIn: "cleanup-in", cleanupOut: "cleanup-out",
+  callerMinutes: "minutes", callMinutes: "call-minutes",
+  replyMinutesPer100: "reply-minutes-per-100", cleanupsPerMinute: "cleanups-per-minute",
 };
 
 function costInput(id) {
@@ -381,11 +474,12 @@ function updateCost() {
   const estimates = core.estimateCosts(usage);
   const format = (amount) => Number.isFinite(amount) ? usd.format(amount) : "—";
   const count = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
+  el("audio-hours").textContent = estimates ? `${count.format(usage.callerMinutes / 60)} hours of caller audio per month` : "";
   el("cost-nova").textContent = format(estimates?.nova);
   el("cost-nova-previous").textContent = estimates ? `${format(estimates.novaPrevious)} at previous rate` : "";
-  el("cost-gemini").textContent = format(estimates ? estimates.geminiInput + estimates.geminiOutput + estimates.geminiText : undefined);
+  el("cost-gemini").textContent = format(estimates ? estimates.geminiInput + estimates.geminiOutput : undefined);
   el("cost-gemini-details").textContent = estimates
-    ? `${format(estimates.geminiInput)} input + ${format(estimates.geminiOutput)} reply + ${format(estimates.geminiText)} text`
+    ? `${format(estimates.geminiInput)} caller audio + ${format(estimates.geminiOutput)} for ${count.format(estimates.replyMinutes)} reply min`
     : "";
   el("cost-azure").textContent = format(estimates?.azure);
   el("cost-azure-free").textContent = estimates?.azureFree === false ? "Over F0 limit" : format(estimates ? 0 : undefined);
@@ -396,6 +490,7 @@ function updateCost() {
     : "";
   el("cost-cleanup").textContent = format(estimates?.flashLite);
   el("cost-qwen").textContent = format(estimates?.qwen);
+  el("cost-cleanup-volume").textContent = estimates ? `About ${count.format(estimates.requests)} cleanup requests per month at this volume.` : "";
   el("cost-error").hidden = Boolean(estimates);
 }
 
@@ -534,4 +629,5 @@ if (window.DEMO_DATA && core) {
 }
 for (const id of Object.values(costFields)) el(id).addEventListener("input", updateCost);
 for (const id of ["hosting-count", "hosting-monthly", "hosting-setup"]) el(id).addEventListener("input", updateHostingCost);
+renderIntentPilot(window.INTENT_BENCHMARK);
 updateCost();

@@ -8,7 +8,7 @@ A benchmark demo for Sinhala call-center speech recognition. Live test compares 
 2. Open **Cleanup** to play the 1× replay, scrub the waveform, or expand **Captured streams**. **Show results** jumps to the full outputs.
 3. Compare **Raw** and **LLM cleanup** for either captured provider. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
 4. The simulated scenarios load the supplied exact wording automatically. **Live test → Transcript comparison and accuracy** lets you select a provider and compare raw and LLM outputs with the reference. **Cleanup** offers the same comparison for the two captured providers. Changed and extra words are highlighted, and missing words are struck through. For a microphone recording, paste the reference after the run. Reference edits stay in the browser tab.
-5. Open **Benchmarks** for the three-call pilot, **Costs** for the source-linked calculator, and **Deployment** for the Azure region comparison and call-center rollout checks.
+5. Open **Benchmarks** for intent, critical details, and first-text timing across four recorded scenarios. Select a scenario to hear the audio and inspect every tested model. Enter monthly caller audio minutes in **Costs** for a source-linked estimate. **Deployment** includes the Azure region comparison and call-center rollout checks.
 6. Choose **Load real calls** and select the separate private replay file from your computer. The tab loads the recording and captured transcripts locally. Keep the file outside the repository and deployment.
 
 ## Deploy to Vercel
@@ -68,4 +68,4 @@ Open [localhost:8080](http://localhost:8080). Run the dependency-free checks wit
 node --test
 ```
 
-Captured streams under **Cleanup** contains simulated audio and captured outputs. **Benchmarks** includes anonymized numerical measurements for three real calls from the pilot. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.
+Captured streams under **Cleanup** contains simulated audio and captured outputs. For the scenario benchmark, providers received the same 16 kHz mono stream in 20 ms packets at recording speed. A shared text model extracted intent and fields from each raw transcript, and the extracted values were checked against the supplied references. The page also includes anonymized latency measurements for three real calls, with speech boundaries estimated by Silero VAD.

@@ -161,6 +161,8 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .cost-inputs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .cost-inputs label { display: grid; gap: 5px; color: var(--muted); font-size: .875rem; font-weight: 640; }
 .cost-inputs input { width: 100%; }
+.cost-inputs.cost-main-input { grid-template-columns: minmax(0, 17rem); gap: 4px; }
+.cost-main-input .section-note { margin: 0; }
 .evidence-table { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcf5; }
 .evidence-table table { margin: 0; text-align: left; }
 .evidence-table :is(th, td) { padding: 8px 11px; vertical-align: top; line-height: 1.4; }
@@ -169,6 +171,13 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .evidence-table output { font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .evidence-table small { display: block; color: var(--muted); }
 .evidence-table a { color: var(--green); }
+.pilot-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 14px; }
+.pilot-controls audio { max-width: 100%; }
+.pilot-case-link { padding: 0; border: 0; background: none; color: var(--green); font: inherit; font-weight: 700; text-align: left; text-decoration: underline; }
+.pilot-evidence-list { margin: 6px 0; padding-inline-start: 20px; }
+.pilot-evidence-list li { margin-bottom: 4px; }
+.pilot-evidence-list .missed { color: #792718; }
+.pilot-raw { max-height: 10rem; overflow: auto; margin: 6px 0 0; overflow-wrap: anywhere; }
 .evidence-heading { margin: 14px 0 0; font-size: 1rem; }
 .live-reference { margin-top: 8px; }
 .live-accuracy { font-variant-numeric: tabular-nums; font-weight: 700; }

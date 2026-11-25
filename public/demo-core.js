@@ -190,8 +190,6 @@
     novaPreviousPerMinute: 0.0077,
     geminiAudioInputPerMinute: 0.005,
     geminiAudioOutputPerMinute: 0.018,
-    geminiTextInputPerMillion: 0.75,
-    geminiTextOutputPerMillion: 4.50,
     azurePerHour: 1,
     azureFreeMinutes: 300,
     groqPerHour: 0.111,
@@ -203,30 +201,31 @@
     qwenOutputPerMillion: 4,
   });
 
-  function estimateCosts({
-    callerMinutes, callSeconds, replyMinutes, liveTextIn, liveTextOut, requests, cleanupIn, cleanupOut,
-  }) {
-    if (!(Number.isFinite(callSeconds) && callSeconds > 0) ||
-        ![callerMinutes, replyMinutes, liveTextIn, liveTextOut, requests, cleanupIn, cleanupOut]
+  function estimateCosts({ callerMinutes, callMinutes, replyMinutesPer100, cleanupsPerMinute }) {
+    if (!(Number.isFinite(callMinutes) && callMinutes > 0) ||
+        ![callerMinutes, replyMinutesPer100, cleanupsPerMinute]
           .every((value) => Number.isFinite(value) && value >= 0)) return null;
-    const million = 1000000;
-    const groqChunks = Math.ceil(callSeconds / prices.groqChunkSeconds) * callerMinutes * 60 / callSeconds;
+    const replyMinutes = callerMinutes * replyMinutesPer100 / 100;
+    const requests = callerMinutes * cleanupsPerMinute;
+    const groqChunks = Math.ceil(callMinutes * 60 / prices.groqChunkSeconds) * (callerMinutes / callMinutes);
     const groqBilledMinutes = groqChunks * prices.groqMinimumSeconds / 60;
-    const tokenCost = (input, output, inputRate, outputRate) => (input * inputRate + output * outputRate) / million;
+    // Rounded mean input/output token counts from the 12 captured cleanup requests.
+    const cleanupCost = (inputRate, outputRate) => requests * (214 * inputRate + 143 * outputRate) / 1000000;
     return {
       nova: callerMinutes * prices.novaPerMinute,
       novaPrevious: callerMinutes * prices.novaPreviousPerMinute,
       openai: callerMinutes * prices.openaiPerMinute,
       geminiInput: callerMinutes * prices.geminiAudioInputPerMinute,
       geminiOutput: replyMinutes * prices.geminiAudioOutputPerMinute,
-      geminiText: tokenCost(liveTextIn, liveTextOut, prices.geminiTextInputPerMillion, prices.geminiTextOutputPerMillion),
+      replyMinutes,
+      requests,
       azure: callerMinutes * prices.azurePerHour / 60,
       azureFree: callerMinutes <= prices.azureFreeMinutes,
       groq: groqBilledMinutes * prices.groqPerHour / 60,
       groqChunks,
       groqBilledMinutes,
-      flashLite: requests * tokenCost(cleanupIn, cleanupOut, prices.flashLiteInputPerMillion, prices.flashLiteOutputPerMillion),
-      qwen: requests * tokenCost(cleanupIn, cleanupOut, prices.qwenInputPerMillion, prices.qwenOutputPerMillion),
+      flashLite: cleanupCost(prices.flashLiteInputPerMillion, prices.flashLiteOutputPerMillion),
+      qwen: cleanupCost(prices.qwenInputPerMillion, prices.qwenOutputPerMillion),
     };
   }
 

@@ -43,12 +43,9 @@ function initDashboard(initialHash = "", runtime = {}) {
   nodes.scenario.value = "pause_and_talk";
   nodes["cleanup-provider"].value = "deepgram";
   nodes.minutes.value = "10000";
-  nodes["call-seconds"].value = "180";
-  nodes["reply-minutes"].value = "3000";
-  nodes["live-text-in"].value = nodes["live-text-out"].value = "0";
-  nodes["cleanup-requests"].value = "2000";
-  nodes["cleanup-in"].value = "214";
-  nodes["cleanup-out"].value = "143";
+  nodes["call-minutes"].value = "3";
+  nodes["reply-minutes-per-100"].value = "30";
+  nodes["cleanups-per-minute"].value = "6";
   nodes["hosting-count"].value = "1";
   nodes["hosting-setup"].value = "0";
   const browser = {
@@ -64,7 +61,7 @@ function initDashboard(initialHash = "", runtime = {}) {
   };
   browser.window = browser;
   const sandbox = vm.createContext(browser);
-  for (const file of ["assets/demo-data.js", "assets/references.js", "demo-core.js", "live-wire.js", "live-azure.js", "app.js", "live.js"]) {
+  for (const file of ["assets/demo-data.js", "assets/references.js", "assets/intent-benchmark.js", "demo-core.js", "live-wire.js", "live-azure.js", "app.js", "live.js"]) {
     vm.runInContext(load(file), sandbox, { filename: file });
   }
   return { nodes, data: browser.DEMO_DATA, browser };
@@ -125,37 +122,63 @@ test("comparison tabs are exclusive, keyboard-accessible, and preserve playback"
 
 test("price calculator uses published units and captured cleanup usage", () => {
   const usage = {
-    callerMinutes: 10000, callSeconds: 180, replyMinutes: 3000, liveTextIn: 0, liveTextOut: 0,
-    requests: 2000, cleanupIn: 214, cleanupOut: 143,
+    callerMinutes: 10000, callMinutes: 3, replyMinutesPer100: 30, cleanupsPerMinute: 6,
   };
   const result = core.estimateCosts(usage);
   assert.equal(result.nova.toFixed(2), "48.00");
   assert.equal(result.openai.toFixed(2), "170.00");
   assert.equal(result.geminiInput.toFixed(2), "50.00");
   assert.equal(result.geminiOutput.toFixed(2), "54.00");
-  assert.equal(result.flashLite.toFixed(2), "0.84");
+  assert.equal(result.flashLite.toFixed(2), "25.30");
   assert.equal(result.groqBilledMinutes, 25000);
   assert.equal(result.groq.toFixed(2), "46.25");
-  assert.equal(core.estimateCosts({ ...usage, callerMinutes: 10, callSeconds: 5 }).groqBilledMinutes, 40);
+  const partialChunk = core.estimateCosts({ ...usage, callMinutes: 3.05 });
+  assert.ok(partialChunk.groq > result.groq);
+  assert.equal(partialChunk.nova, result.nova);
+  assert.equal(core.estimateCosts({ ...usage, callerMinutes: 10, callMinutes: 5 / 60 }).groqBilledMinutes, 40);
   assert.equal(core.estimateCosts({ ...usage, callerMinutes: 300 }).azureFree, true);
-  assert.equal(core.estimateCosts({ ...usage, callSeconds: 0 }), null);
+  assert.equal(core.estimateCosts({ ...usage, callMinutes: 0 }), null);
   const { nodes } = initDashboard();
   assert.equal(nodes["cost-nova"].textContent, "$48.00");
   assert.equal(nodes["cost-gemini"].textContent, "$104.00");
   assert.equal(nodes["cost-openai"].textContent, "$170.00");
   assert.equal(nodes["cost-azure"].textContent, "$166.67");
   assert.equal(nodes["cost-azure-free"].textContent, "Over F0 limit");
-  assert.equal(nodes["cost-cleanup"].textContent, "$0.84");
-  assert.equal(nodes["cost-qwen"].textContent, "$1.49");
-  nodes["reply-minutes"].value = "0";
-  nodes["live-text-out"].value = "1000000";
-  nodes["reply-minutes"].callbacks.input();
-  assert.equal(nodes["cost-gemini"].textContent, "$54.50");
+  assert.equal(nodes["cost-cleanup"].textContent, "$25.30");
+  assert.equal(nodes["cost-qwen"].textContent, "$44.59");
+  nodes.minutes.value = "20000";
+  nodes.minutes.callbacks.input();
+  assert.equal(nodes["cost-gemini"].textContent, "$208.00");
+  assert.equal(nodes["cost-cleanup"].textContent, "$50.60");
+  nodes["reply-minutes-per-100"].value = "0";
+  nodes["reply-minutes-per-100"].callbacks.input();
+  assert.equal(nodes["cost-gemini"].textContent, "$100.00");
+  nodes["cleanups-per-minute"].value = "0";
+  nodes["cleanups-per-minute"].callbacks.input();
+  assert.equal(nodes["cost-cleanup"].textContent, "$0.00");
   nodes["hosting-count"].value = "2";
   nodes["hosting-monthly"].value = "100";
   nodes["hosting-setup"].value = "70";
   nodes["hosting-monthly"].callbacks.input();
   assert.match(nodes["hosting-result"].textContent, /\$200\.00\/month · \$340\.00/);
+});
+
+test("scenario benchmark surfaces ties, agent fields, and unavailable models", () => {
+  const { nodes } = initDashboard("#benchmark");
+  const rows = nodes["intent-summary"].children;
+  assert.equal(rows.length, 4);
+  assert.match(rows[0].children[1].textContent, /Gemini Live, Azure Speech.*5\/5/);
+  assert.match(rows[1].children[1].textContent, /Azure Speech.*4\/5/);
+  assert.match(rows[2].children[1].textContent, /missed the account number/);
+  rows[1].children[0].children[0].callbacks.click();
+  assert.equal(nodes["intent-evidence"].open, true);
+  assert.equal(nodes["intent-audio"].src, "assets/urban-fast-original.mp4");
+  assert.match(nodes["intent-expected"].textContent, /card payment/);
+  const evidence = nodes["intent-rows"].children;
+  assert.equal(evidence.length, 5);
+  assert.match(evidence[0].textContent, /28550.*28500/);
+  assert.match(evidence[2].textContent, /4\/5.*Review email address/);
+  assert.match(evidence[3].textContent, /API credits exhausted/);
 });
 
 test("local replay pack imports without adding any provider request", async () => {

@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="style.css">
   <script src="assets/demo-data.js" defer></script>
   <script src="assets/references.js" defer></script>
+  <script src="assets/intent-benchmark.js" defer></script>
   <script src="demo-core.js" defer></script>
   <script src="live-wire.js" defer></script>
   <script src="live-azure.js" defer></script>
@@ -142,9 +143,34 @@
 
     <section id="benchmark" class="view" role="tabpanel" aria-labelledby="tab-benchmark" tabindex="0" hidden>
       <div class="section-title">
-        <h2>Three real calls</h2>
-        <p>Median delay from estimated speech onset at 1×.</p>
+        <h2>Which model gets the call right?</h2>
+        <p>One clean recording per scenario, streamed at 1×.</p>
       </div>
+      <p class="section-note">The same text agent reads each raw transcript. We check whether it identifies the caller’s goal and retrieves the details it needs to act.</p>
+      <div class="table-scroll evidence-table" role="region" aria-label="Best results by scenario" tabindex="0">
+        <table role="table">
+          <thead><tr><th scope="col">Scenario</th><th scope="col">Best intent and details</th><th scope="col">Fastest first text</th></tr></thead>
+          <tbody id="intent-summary"></tbody>
+        </table>
+      </div>
+      <details class="per-call" id="intent-evidence">
+        <summary>Inspect each model’s transcript and field checks</summary>
+        <div class="pilot-controls">
+          <div class="local-select"><label for="intent-case">Recording</label><select id="intent-case"></select></div>
+          <audio id="intent-audio" controls preload="none" aria-label="Listen to the benchmark recording"></audio>
+        </div>
+        <p id="intent-expected" class="section-note"></p>
+        <div class="table-scroll evidence-table" role="region" aria-label="Results for the selected benchmark recording" tabindex="0">
+          <table role="table">
+            <thead><tr><th scope="col">Model</th><th scope="col">Goal understood</th><th scope="col">Details recovered</th><th scope="col">First text</th><th scope="col">Evidence</th></tr></thead>
+            <tbody id="intent-rows"></tbody>
+          </table>
+        </div>
+      </details>
+      <p id="intent-method" class="section-note"></p>
+      <details class="per-call">
+        <summary>Earlier real-call pilot · latency only</summary>
+        <p class="section-note">Median delay from estimated speech onset at 1×.</p>
       <div class="metrics" id="metrics"></div>
       <div class="rollup">
         <div class="rollup-number" id="interim-lag">–</div>
@@ -158,6 +184,7 @@
             <tbody id="call-rows"></tbody>
           </table>
         </div>
+      </details>
       </details>
       <details class="per-call" id="decision">
         <summary>Call-center rollout checks</summary>
@@ -179,23 +206,20 @@
     </section>
     <section id="costs" class="view" role="tabpanel" aria-labelledby="tab-costs" tabindex="0" hidden>
       <div class="section-title"><h2>Monthly cost calculator</h2><p>Provider rate cards checked <time datetime="2026-11-25">25 November 2026</time>. Estimates in USD.</p></div>
-      <div class="cost-inputs">
-        <label>Caller audio min/month<input id="minutes" type="number" min="0" step="any" value="10000"></label>
-        <label>Average call length (s)<input id="call-seconds" type="number" min="1" step="any" value="180"></label>
-        <label>Gemini reply audio min/month<input id="reply-minutes" type="number" min="0" step="any" value="3000"></label>
+      <div class="cost-inputs cost-main-input">
+        <label>Caller audio minutes per month<input id="minutes" type="number" min="0" step="any" value="10000" aria-describedby="audio-hours"></label>
+        <p id="audio-hours" class="section-note"></p>
       </div>
       <details class="per-call">
-        <summary>Gemini text and optional cleanup usage</summary>
+        <summary>Change estimate assumptions</summary>
         <div class="cost-inputs">
-          <label>Gemini billed text input tokens/month<input id="live-text-in" type="number" min="0" step="1" value="0"></label>
-          <label>Gemini billed text output and thinking tokens/month<input id="live-text-out" type="number" min="0" step="1" value="0"></label>
-          <label>LLM cleanup requests/month<input id="cleanup-requests" type="number" min="0" step="1" value="2000"></label>
-          <label>Average cleanup input tokens/request<input id="cleanup-in" type="number" min="0" step="any" value="214"></label>
-          <label>Average cleanup billed output tokens/request<input id="cleanup-out" type="number" min="0" step="any" value="143"></label>
+          <label>Typical call length in minutes<input id="call-minutes" type="number" min="0.1" step="any" value="3"><small>Used for Groq’s final audio chunk on each call.</small></label>
+          <label>Gemini reply minutes per 100 caller minutes<input id="reply-minutes-per-100" type="number" min="0" step="any" value="30"><small>Use 0 for an audio-input-only estimate.</small></label>
+          <label>LLM cleanup runs per caller minute<input id="cleanups-per-minute" type="number" min="0" step="any" value="6"><small>Six assumes one cleanup request per ten seconds of caller audio.</small></label>
         </div>
-        <p class="section-note">Cleanup defaults are rounded averages from 12 captured Flash-Lite requests. Use your own chunk and context counts for live cleanup. Gemini text estimates use standard text rates.</p>
+        <p class="section-note">Cleanup assumes 214 input and 143 output tokens per request, rounded from 12 captured requests. Actual chunk sizes and context affect billing.</p>
       </details>
-      <p id="cost-error" class="section-note" role="status" hidden>Enter non-negative usage in each field and a call length of at least one second.</p>
+      <p id="cost-error" class="section-note" role="status" hidden>Enter zero or more for audio, replies, and cleanup, and at least 0.1 minutes for typical call length.</p>
       <div class="table-scroll evidence-table value-table" role="region" aria-label="Transcription rates and monthly estimates" tabindex="0">
         <table role="table">
           <thead><tr><th scope="col">Transcription</th><th scope="col">Rate and billing basis</th><th scope="col">Est. / month</th><th scope="col">Evidence</th></tr></thead>
@@ -210,6 +234,7 @@
         </table>
       </div>
       <h3 class="evidence-heading">Optional cleanup</h3>
+      <p id="cost-cleanup-volume" class="section-note"></p>
       <div class="table-scroll evidence-table value-table" role="region" aria-label="Cleanup rates and monthly estimates" tabindex="0">
         <table role="table">
           <thead><tr><th scope="col">Cleanup</th><th scope="col">Rate and billing basis</th><th scope="col">Est. / month</th><th scope="col">Evidence</th></tr></thead>
@@ -229,7 +254,7 @@
         </div>
         <p id="hosting-result" class="section-note" role="status">Enter the quoted monthly rental to estimate server costs.</p>
       </details>
-      <p class="section-note">The rates cover the listed services before taxes and credits. Budget separately for telephony and any separate agent LLM or TTS. Gemini reply audio can be billable even when the demo mutes it.</p>
+      <p class="section-note">Estimates are before taxes and credits. Budget separately for telephony, Gemini text and reasoning, and any separate agent LLM or TTS. Gemini reply audio can be billable even when the demo mutes it.</p>
     </section>
     <section id="deployment" class="view" role="tabpanel" aria-labelledby="tab-deployment" tabindex="0" hidden>
       <div class="section-title"><h2>Deployment options</h2><p>Choose a region and test against the call-center network.</p></div>
