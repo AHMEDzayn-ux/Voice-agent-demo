@@ -193,7 +193,7 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   const recordings = nodes["live-recording"];
   assert.equal(recordings.children.length, 1);
   assert.equal(recordings.children[0].label, "Simulated recordings");
-  assert.equal(recordings.children[0].children.length, 14);
+  assert.equal(recordings.children[0].children.length, 15);
   assert.equal(recordings.value, "pause_and_talk/clean");
   assert.match(nodes["live-reference"].value, /^සුළු අසනීපයක්/);
   recordings.value = "code_switch/phone_office";
@@ -225,6 +225,15 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
     assert.equal(audio.readUInt32LE(24), 8000);
     assert.equal(audio.readUInt32LE(40), 423936 * 2);
   }
+  assert.ok(recordings.children[0].children.some((entry) => entry.value === "southern_accent/clean"));
+  recordings.value = "southern_accent/clean";
+  recordings.callbacks.change();
+  assert.equal(nodes["live-reference"].value, browser.DEMO_REFERENCES.southern_accent);
+  const southern = fs.readFileSync(path.join(site, "assets/southern-accent.wav"));
+  assert.equal(southern.toString("ascii", 8, 16), "WAVEfmt ");
+  assert.equal(southern.readUInt16LE(22), 1);
+  assert.equal(southern.readUInt32LE(24), 16000);
+  assert.equal(southern.readUInt32LE(40), 787584 * 2);
   const input = nodes["live-file"];
   input.files = [{ name: "sample.mp3", size: 10 }];
   input.callbacks.change({ target: input });

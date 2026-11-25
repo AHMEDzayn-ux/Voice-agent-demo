@@ -39,6 +39,7 @@
     { id: "urban_fast/phone_clean", label: "Fast urban speech · Telephone (G.711 A-law)", audio: "assets/urban-fast-phone-clean.wav" },
     { id: "urban_fast/phone_fan", label: "Fast urban speech · Telephone + fan noise", audio: "assets/urban-fast-phone-fan.wav" },
     { id: "urban_fast/phone_office", label: "Fast urban speech · Telephone + office noise", audio: "assets/urban-fast-phone-office.wav" },
+    { id: "southern_accent/clean", label: "Southern Sinhala accent · Clean recording", audio: "assets/southern-accent.wav" },
   ]);
   let localFile = null;
   let current = null;
