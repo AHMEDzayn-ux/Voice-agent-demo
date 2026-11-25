@@ -40,8 +40,14 @@ function initDashboard(initialHash = "", runtime = {}) {
   nodes.scenario.value = "pause_and_talk";
   nodes["cleanup-provider"].value = "deepgram";
   nodes.minutes.value = "10000";
+  nodes["call-seconds"].value = "180";
   nodes["reply-minutes"].value = "3000";
+  nodes["live-text-in"].value = nodes["live-text-out"].value = "0";
   nodes["cleanup-requests"].value = "2000";
+  nodes["cleanup-in"].value = "214";
+  nodes["cleanup-out"].value = "143";
+  nodes["hosting-count"].value = "1";
+  nodes["hosting-setup"].value = "0";
   const browser = {
     document: { getElementById: (id) => nodes[id], createElement: node },
     requestAnimationFrame: () => 1, cancelAnimationFrame() {}, performance: { now: () => 123 },
@@ -72,13 +78,14 @@ test("Unicode rules, literal approved terms, and numeric guard", () => {
 
 test("comparison tabs are exclusive, keyboard-accessible, and preserve playback", async () => {
   const { nodes, browser } = initDashboard();
-  assert.equal(nodes.replay.hidden, false);
+  assert.equal(nodes["tab-replay"], undefined);
+  assert.equal(nodes.live.hidden, false);
   assert.equal(nodes.cleanup.hidden, true);
   assert.equal(nodes.benchmark.hidden, true);
-  await nodes.play.callbacks.click();
   nodes["tab-cleanup"].callbacks.click();
-  assert.equal(nodes.replay.hidden, true);
   assert.equal(nodes.cleanup.hidden, false);
+  assert.equal(nodes["replay-console"].hidden, false);
+  await nodes.play.callbacks.click();
   assert.equal(nodes.audio.paused, false);
   assert.equal(browser.location.hash, "#cleanup");
   let prevented = false;
@@ -86,32 +93,54 @@ test("comparison tabs are exclusive, keyboard-accessible, and preserve playback"
   assert.ok(prevented);
   assert.equal(nodes.benchmark.hidden, false);
   assert.equal(nodes.cleanup.hidden, true);
+  assert.equal(nodes["replay-console"].hidden, true);
+  assert.equal(nodes.audio.paused, true);
   assert.equal(nodes["tab-benchmark"].focused, true);
   assert.equal(nodes["tab-benchmark"].tabIndex, 0);
   assert.equal(nodes["tab-cleanup"].tabIndex, -1);
   browser.location.hash = "#replay";
   browser.listeners.hashchange();
-  assert.equal(nodes.replay.hidden, false);
+  assert.equal(nodes.replay.open, true);
+  assert.equal(nodes.cleanup.hidden, false);
   assert.equal(nodes.benchmark.hidden, true);
   assert.equal(initDashboard("#cleanup").nodes.cleanup.hidden, false);
+  assert.equal(initDashboard("#costs").nodes.costs.hidden, false);
+  assert.equal(initDashboard("#deployment").nodes.deployment.hidden, false);
 });
 
 test("price calculator uses published units and captured cleanup usage", () => {
-  const result = core.estimateCosts(10000, 3000, 2000);
+  const usage = {
+    callerMinutes: 10000, callSeconds: 180, replyMinutes: 3000, liveTextIn: 0, liveTextOut: 0,
+    requests: 2000, cleanupIn: 214, cleanupOut: 143,
+  };
+  const result = core.estimateCosts(usage);
   assert.equal(result.nova.toFixed(2), "48.00");
   assert.equal(result.openai.toFixed(2), "170.00");
-  assert.equal(result.geminiInput, 45);
-  assert.equal(result.geminiOutput, 54);
-  assert.equal(result.cleanup.toFixed(2), "0.84");
-  assert.equal(core.estimateCosts(-1, 0, 0), null);
+  assert.equal(result.geminiInput.toFixed(2), "50.00");
+  assert.equal(result.geminiOutput.toFixed(2), "54.00");
+  assert.equal(result.flashLite.toFixed(2), "0.84");
+  assert.equal(result.groqBilledMinutes, 25000);
+  assert.equal(result.groq.toFixed(2), "46.25");
+  assert.equal(core.estimateCosts({ ...usage, callerMinutes: 10, callSeconds: 5 }).groqBilledMinutes, 40);
+  assert.equal(core.estimateCosts({ ...usage, callerMinutes: 300 }).azureFree, true);
+  assert.equal(core.estimateCosts({ ...usage, callSeconds: 0 }), null);
   const { nodes } = initDashboard();
-  assert.equal(nodes["cost-nova"].textContent, "$48.00/mo");
-  assert.equal(nodes["cost-gemini"].textContent, "$99.00/mo");
-  assert.equal(nodes["cost-openai"].textContent, "$170.00/mo");
-  assert.equal(nodes["cost-cleanup"].textContent, "$0.84/mo");
+  assert.equal(nodes["cost-nova"].textContent, "$48.00");
+  assert.equal(nodes["cost-gemini"].textContent, "$104.00");
+  assert.equal(nodes["cost-openai"].textContent, "$170.00");
+  assert.equal(nodes["cost-azure"].textContent, "$166.67");
+  assert.equal(nodes["cost-azure-free"].textContent, "Over F0 limit");
+  assert.equal(nodes["cost-cleanup"].textContent, "$0.84");
+  assert.equal(nodes["cost-qwen"].textContent, "$1.49");
   nodes["reply-minutes"].value = "0";
+  nodes["live-text-out"].value = "1000000";
   nodes["reply-minutes"].callbacks.input();
-  assert.equal(nodes["cost-gemini"].textContent, "$45.00/mo");
+  assert.equal(nodes["cost-gemini"].textContent, "$54.50");
+  nodes["hosting-count"].value = "2";
+  nodes["hosting-monthly"].value = "100";
+  nodes["hosting-setup"].value = "70";
+  nodes["hosting-monthly"].callbacks.input();
+  assert.match(nodes["hosting-result"].textContent, /\$200\.00\/month · \$340\.00/);
 });
 
 test("local replay pack imports without adding any provider request", async () => {
@@ -172,7 +201,7 @@ test("live view shows the OpenAI placeholder without a key and can select a loca
   assert.equal(recordings.value, "local-file");
   assert.equal(recordings.children[1].children[0].textContent, "sample.mp3");
   assert.match(nodes["live-status"].textContent, /ready/);
-  nodes["tab-replay"].callbacks.click();
+  nodes["tab-cleanup"].callbacks.click();
   assert.equal(nodes["replay-console"].hidden, false);
 });
 
@@ -462,11 +491,15 @@ test("recording automatically streams to configured providers and shares identic
   assert.match(readyRows.at(-1).children[0].children[0].children[0].textContent, /4 s chunks/);
   nodes["live-llm"].checked = true;
   nodes["live-recording"].value = "pause_and_talk/phone_fan";
+  nodes["live-recording"].callbacks.change();
+  nodes["live-reference"].value = `${final} ${final} ${short}`;
+  nodes["live-reference"].callbacks.input();
   await nodes["live-stream"].callbacks.click();
   assert.deepEqual(requested, [audio, "/api/live-session"]);
   assert.equal(playback.buffer.length, 640);
   assert.equal(playing, true);
   assert.match(nodes["live-status"].textContent, /Playing and streaming/);
+  assert.equal(readyRows[0].children[1].children[3].hidden, true);
   assert.equal(nodes["live-progress"].hidden, false);
   assert.equal(nodes["live-progress"].max, 0.04);
   assert.ok(nodes["live-feeds"].children.every((panel) => !panel.hidden));
@@ -532,6 +565,9 @@ test("recording automatically streams to configured providers and shares identic
   assert.equal(cleanupBodies.length, 3);
   assert.equal(requested.filter((url) => url === "/api/groq-transcribe").length, 1);
   assert.match(nodes["live-status"].textContent, /complete/i);
+  const deepgramAccuracy = readyRows[0].children[1].children[3];
+  assert.equal(deepgramAccuracy.hidden, false);
+  assert.equal(deepgramAccuracy.textContent, "WER 0.0% · CER 0.0%");
   for (const panel of nodes["live-feeds"].children) {
     const [transcript, timing, note] = panel.children[1].children;
     const [, details] = panel.children[2].children;
@@ -548,6 +584,7 @@ test("recording automatically streams to configured providers and shares identic
   }
   nodes["live-stage"].value = "llm";
   nodes["live-stage"].callbacks.change();
+  assert.equal(deepgramAccuracy.textContent, "WER 0.0% · CER 0.0%");
   for (const panel of nodes["live-feeds"].children) assert.equal(panel.children[1].children[0].children[0].textContent, `${final}.`);
 });
 

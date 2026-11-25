@@ -19,15 +19,16 @@
     <div class="wrap masthead-inner">
       <div class="wordmark"><span class="brand-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><h1>Sinhala STT benchmark</h1></div>
       <div class="view-tabs" role="tablist" aria-label="Comparison views">
-        <button type="button" id="tab-replay" role="tab" aria-selected="true" aria-controls="replay">Streams</button>
-        <button type="button" id="tab-live" role="tab" aria-selected="false" aria-controls="live" tabindex="-1">Live test</button>
+        <button type="button" id="tab-live" role="tab" aria-selected="true" aria-controls="live">Live test</button>
         <button type="button" id="tab-cleanup" role="tab" aria-selected="false" aria-controls="cleanup" tabindex="-1">Cleanup</button>
         <button type="button" id="tab-benchmark" role="tab" aria-selected="false" aria-controls="benchmark" tabindex="-1">Benchmarks</button>
+        <button type="button" id="tab-costs" role="tab" aria-selected="false" aria-controls="costs" tabindex="-1">Costs</button>
+        <button type="button" id="tab-deployment" role="tab" aria-selected="false" aria-controls="deployment" tabindex="-1">Deployment</button>
       </div>
     </div>
   </header>
   <main class="wrap workspace">
-    <section class="console" id="replay-console" aria-label="Shared replay controls">
+    <section class="console" id="replay-console" aria-label="Replay controls" hidden>
         <div class="console-heading">
           <div class="selectors">
             <div class="clip-select"><label for="scenario">Call scenario</label><select id="scenario"></select></div>
@@ -57,7 +58,7 @@
         </div>
     </section>
 
-    <section id="live" class="view" role="tabpanel" aria-labelledby="tab-live" tabindex="0" hidden>
+    <section id="live" class="view" role="tabpanel" aria-labelledby="tab-live" tabindex="0">
       <div class="live-console console">
         <div class="live-session-bar">
           <div class="live-controls">
@@ -84,23 +85,12 @@
       </div>
       <p id="live-provider-notices" role="status" class="live-provider-notices" hidden></p>
       <div id="live-feeds" class="live-feeds"></div>
-    </section>
-
-    <section id="replay" class="view" role="tabpanel" aria-labelledby="tab-replay" tabindex="0">
-      <div class="transcripts">
-        <article class="transcript deepgram">
-          <header><div><p class="provider">Deepgram</p><h3>Nova-3</h3></div><span class="feed-status" id="deepgram-status">Waiting</span></header>
-          <dl class="feed-metrics"><div><dt>First text</dt><dd id="deepgram-arrival">–</dd></div><div><dt>First Sinhala</dt><dd id="deepgram-sinhala">–</dd></div><div><dt>First final</dt><dd id="deepgram-final">–</dd></div><div><dt>Interim events</dt><dd id="deepgram-interims">0</dd></div></dl>
-          <div class="transcript-body" id="deepgram-text" lang="si" aria-label="Deepgram transcript" tabindex="0"></div>
-          <p class="transcript-foot" id="deepgram-note">Times measured from estimated speech onset.</p>
-        </article>
-        <article class="transcript gemini">
-          <header><div><p class="provider">Google</p><h3>Gemini 3.8 Live</h3></div><span class="feed-status" id="gemini-status">Waiting</span></header>
-          <dl class="feed-metrics"><div><dt>First text</dt><dd id="gemini-arrival">–</dd></div><div><dt>First Sinhala</dt><dd id="gemini-sinhala">–</dd></div><div><dt>First final</dt><dd id="gemini-final">–</dd></div><div><dt>Interim events</dt><dd id="gemini-interims">0</dd></div></dl>
-          <div class="transcript-body" id="gemini-text" lang="si" aria-label="Gemini transcript" tabindex="0"></div>
-          <p class="transcript-foot" id="gemini-note">Times measured from estimated speech onset.</p>
-        </article>
-      </div>
+      <details class="per-call live-reference">
+        <summary>Accuracy reference</summary>
+        <label for="live-reference">Exact transcript for this recording or mic test</label>
+        <textarea id="live-reference" rows="4" maxlength="12000" placeholder="Paste what was actually spoken, including English words and numbers."></textarea>
+        <p class="section-note">Use the same reference across noise variants of a clip. For a mic test, paste it after the run. Word and character error rates are calculated in your browser.</p>
+      </details>
     </section>
 
     <section id="cleanup" class="view" role="tabpanel" aria-labelledby="tab-cleanup" tabindex="0" hidden>
@@ -122,6 +112,23 @@
         <article class="stage"><h3>LLM cleanup</h3><p class="stage-meta" id="llm-meta">Captured Gemini Flash-Lite request</p><div id="llm-output" class="stage-output" lang="si" tabindex="0"></div><p id="llm-score" class="stage-score"></p><p id="llm-guard" class="guard"></p></article>
       </div>
       <p class="section-note" id="cleanup-note">Replay the selected sample all the way through to score complete transcripts.</p>
+      <details id="replay" class="per-call">
+        <summary>Captured streams</summary>
+      <div class="transcripts">
+        <article class="transcript deepgram">
+          <header><div><p class="provider">Deepgram</p><h3>Nova-3</h3></div><span class="feed-status" id="deepgram-status">Waiting</span></header>
+          <dl class="feed-metrics"><div><dt>First text</dt><dd id="deepgram-arrival">–</dd></div><div><dt>First Sinhala</dt><dd id="deepgram-sinhala">–</dd></div><div><dt>First final</dt><dd id="deepgram-final">–</dd></div><div><dt>Interim events</dt><dd id="deepgram-interims">0</dd></div></dl>
+          <div class="transcript-body" id="deepgram-text" lang="si" aria-label="Deepgram transcript" tabindex="0"></div>
+          <p class="transcript-foot" id="deepgram-note">Times measured from estimated speech onset.</p>
+        </article>
+        <article class="transcript gemini">
+          <header><div><p class="provider">Google</p><h3>Gemini 3.8 Live</h3></div><span class="feed-status" id="gemini-status">Waiting</span></header>
+          <dl class="feed-metrics"><div><dt>First text</dt><dd id="gemini-arrival">–</dd></div><div><dt>First Sinhala</dt><dd id="gemini-sinhala">–</dd></div><div><dt>First final</dt><dd id="gemini-final">–</dd></div><div><dt>Interim events</dt><dd id="gemini-interims">0</dd></div></dl>
+          <div class="transcript-body" id="gemini-text" lang="si" aria-label="Gemini transcript" tabindex="0"></div>
+          <p class="transcript-foot" id="gemini-note">Times measured from estimated speech onset.</p>
+        </article>
+      </div>
+      </details>
     </section>
 
     <section id="benchmark" class="view" role="tabpanel" aria-labelledby="tab-benchmark" tabindex="0" hidden>
@@ -151,23 +158,6 @@
           <article class="decision-card"><h3>Reliability and cost</h3><p>Track dropped sessions, no-text cases and p95 latency at peak concurrency. Price audio, model output and cleanup.</p></article>
         </div>
       </details>
-      <details class="per-call cost-panel">
-        <summary>Estimate monthly processing cost</summary>
-        <p class="section-note">Published USD rates checked <time datetime="2026-11-25">November 25, 2026</time>. Enter your expected volumes.</p>
-        <div class="cost-inputs">
-          <label>Caller audio minutes / month<input id="minutes" type="number" min="0" step="any" value="10000"></label>
-          <label>Gemini reply audio minutes / month<input id="reply-minutes" type="number" min="0" step="any" value="3000"></label>
-          <label>Optional cleanup requests / month<input id="cleanup-requests" type="number" min="0" step="1" value="2000"></label>
-        </div>
-        <ul class="cost-results" id="cost-result" aria-live="polite">
-          <li><span>Nova-3 transcription</span><strong id="cost-nova">—</strong></li>
-          <li><span>Gemini Live audio</span><strong id="cost-gemini">—</strong></li>
-          <li><span>GPT Live Transcribe</span><strong id="cost-openai">—</strong></li>
-          <li><span>Flash-Lite cleanup</span><strong id="cost-cleanup">—</strong></li>
-        </ul>
-        <p class="section-note" id="cost-breakdown"></p>
-        <p class="section-note"><a href="https://deepgram.com/pricing#speech-to-text">Nova-3</a> uses the $0.0048/min monolingual streaming promo rate. <a href="https://aistudio.google.com/docs/pricing#gemini-3.8-live">Gemini Live</a> audio uses $3/M input and $12/M output tokens at an assumed 25 tokens/sec. Text, retained context, and thinking can add charges. <a href="https://developers.openai.com/api/docs/models/gpt-live-transcribe">GPT Live Transcribe</a> costs $0.017 per caller audio minute. <a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Flash-Lite</a> uses $0.30/M text input and $2.50/M output tokens with usage from 12 captured requests. Telephony and separate agent LLM and TTS costs are outside these figures.</p>
-      </details>
       <details id="method" class="per-call method">
         <summary>How we measured</summary>
         <dl>
@@ -177,6 +167,85 @@
           <div><dt>Cleanup</dt><dd>CER and WER use a human-verified reference. The scores ignore formatting and punctuation. LLM delay comes from the captured Flash-Lite request.</dd></div>
         </dl>
       </details>
+    </section>
+    <section id="costs" class="view" role="tabpanel" aria-labelledby="tab-costs" tabindex="0" hidden>
+      <div class="section-title"><h2>Monthly cost calculator</h2><p>Provider rate cards checked <time datetime="2026-11-25">25 November 2026</time>. Estimates in USD.</p></div>
+      <div class="cost-inputs">
+        <label>Caller audio min/month<input id="minutes" type="number" min="0" step="any" value="10000"></label>
+        <label>Average call length (s)<input id="call-seconds" type="number" min="1" step="any" value="180"></label>
+        <label>Gemini reply audio min/month<input id="reply-minutes" type="number" min="0" step="any" value="3000"></label>
+      </div>
+      <details class="per-call">
+        <summary>Gemini text and optional cleanup usage</summary>
+        <div class="cost-inputs">
+          <label>Gemini billed text input tokens/month<input id="live-text-in" type="number" min="0" step="1" value="0"></label>
+          <label>Gemini billed text output and thinking tokens/month<input id="live-text-out" type="number" min="0" step="1" value="0"></label>
+          <label>LLM cleanup requests/month<input id="cleanup-requests" type="number" min="0" step="1" value="2000"></label>
+          <label>Average cleanup input tokens/request<input id="cleanup-in" type="number" min="0" step="any" value="214"></label>
+          <label>Average cleanup billed output tokens/request<input id="cleanup-out" type="number" min="0" step="any" value="143"></label>
+        </div>
+        <p class="section-note">Cleanup defaults are rounded averages from 12 captured Flash-Lite requests. Use your own chunk and context counts for live cleanup. Gemini text estimates use standard text rates.</p>
+      </details>
+      <p id="cost-error" class="section-note" role="status" hidden>Enter non-negative usage in each field and a call length of at least one second.</p>
+      <div class="table-scroll evidence-table value-table" role="region" aria-label="Transcription rates and monthly estimates" tabindex="0">
+        <table role="table">
+          <thead><tr><th scope="col">Transcription</th><th scope="col">Rate and billing basis</th><th scope="col">Est. / month</th><th scope="col">Evidence</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Deepgram Nova-3</th><td>$0.0048/audio min for monolingual streaming. Previous listed rate $0.0077/min.</td><td><output id="cost-nova">—</output><small id="cost-nova-previous"></small></td><td><a href="https://deepgram.com/pricing#speech-to-text">Deepgram pricing</a></td></tr>
+            <tr><th scope="row">Gemini 3.8 Live</th><td>Approx. $0.005/caller audio min + $0.018/reply audio min. Text $0.75 in / $4.50 out per 1M tokens.</td><td><output id="cost-gemini">—</output><small id="cost-gemini-details"></small></td><td><a href="https://aistudio.google.com/docs/pricing#gemini-3.8-live">Google rate card</a></td></tr>
+            <tr><th scope="row">Azure Speech Standard</th><td>$1/audio hour in North Central US, Southeast Asia and UAE North. Billed per second.</td><td><output id="cost-azure">—</output></td><td><a href="https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20meterName%20eq%20%27S1%20Speech%20To%20Text%27%20and%20%28armRegionName%20eq%20%27northcentralus%27%20or%20armRegionName%20eq%20%27southeastasia%27%20or%20armRegionName%20eq%20%27uaenorth%27%29">Microsoft retail meter</a></td></tr>
+            <tr><th scope="row">Azure Speech Free F0</th><td>Up to 5 audio hours/month, where the tier is available.</td><td><output id="cost-azure-free">—</output></td><td><a href="https://azure.microsoft.com/en-us/pricing/details/speech/">Azure Speech pricing</a></td></tr>
+            <tr><th scope="row">OpenAI GPT Live Transcribe</th><td>$0.017/input audio min.</td><td><output id="cost-openai">—</output></td><td><a href="https://developers.openai.com/api/docs/models/gpt-live-transcribe">OpenAI model pricing</a></td></tr>
+            <tr><th scope="row">Groq Whisper Large v3</th><td>$0.111/billed audio hour. Each 4 s request is billed for at least 10 s. The estimate rounds up chunks per call using the average call length.</td><td><output id="cost-groq">—</output><small id="cost-groq-details"></small></td><td><a href="https://console.groq.com/docs/speech-to-text">Groq rates and minimum</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3 class="evidence-heading">Optional cleanup</h3>
+      <div class="table-scroll evidence-table value-table" role="region" aria-label="Cleanup rates and monthly estimates" tabindex="0">
+        <table role="table">
+          <thead><tr><th scope="col">Cleanup</th><th scope="col">Rate and billing basis</th><th scope="col">Est. / month</th><th scope="col">Evidence</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Deterministic rules</th><td>Runs in the browser with no API billing.</td><td><strong>$0.00</strong></td><td>Demo implementation</td></tr>
+            <tr><th scope="row">Gemini 3.5 Flash-Lite</th><td>$0.30 in / $2.50 out per 1M tokens.</td><td><output id="cost-cleanup">—</output></td><td><a href="https://aistudio.google.com/docs/pricing#gemini-3.5-flash-lite">Google rate card</a></td></tr>
+            <tr><th scope="row">Groq Qwen 3.8 27B</th><td>$0.80 in / $4.00 out per 1M tokens.</td><td><output id="cost-qwen">—</output></td><td><a href="https://console.groq.com/docs/model/qwen/qwen3.8-27b">Groq model pricing</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <details class="per-call">
+        <summary>Hetzner self-hosting budget</summary>
+        <p class="section-note">Enter a current USD server quote and the server count supported by your load test. <a href="https://www.hetzner.com/dedicated-rootserver/gex45/">Hetzner GPU quote</a></p>
+        <div class="cost-inputs">
+          <label>Servers<input id="hosting-count" type="number" min="1" step="1" value="1"></label>
+          <label>USD / server / month<input id="hosting-monthly" type="number" min="0" step="any" placeholder="From the quote"></label>
+          <label>USD setup / server<input id="hosting-setup" type="number" min="0" step="any" value="0"></label>
+        </div>
+        <p id="hosting-result" class="section-note" role="status">Enter the quoted monthly rental to estimate server costs.</p>
+      </details>
+      <p class="section-note">The rates cover the listed services before taxes and credits. Budget separately for telephony and any separate agent LLM or TTS. Gemini reply audio can be billable even when the demo mutes it.</p>
+    </section>
+    <section id="deployment" class="view" role="tabpanel" aria-labelledby="tab-deployment" tabindex="0" hidden>
+      <div class="section-title"><h2>Deployment options</h2><p>Choose a region and test against the call-center network.</p></div>
+      <div class="table-scroll evidence-table value-table region-table" role="region" aria-label="Azure Speech region comparison" tabindex="0">
+        <table role="table">
+          <thead><tr><th scope="col">Azure Speech region</th><th scope="col">Azure network RTT from South India</th><th scope="col">What to test</th><th scope="col">Evidence</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">North Central US <small><code>northcentralus</code></small></th><td>240 ms</td><td>Use as the US baseline if this matches the resource’s Azure Location.</td><td><a href="https://learn.microsoft.com/en-us/azure/networking/azure-network-latency">Azure backbone RTT</a></td></tr>
+            <tr><th scope="row">Southeast Asia <small><code>southeastasia</code></small></th><td>37 ms</td><td>Try this region if your subscription allows it. Create a Speech resource there and use its key and region together.</td><td><a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/regions#use-region-identifiers">Speech endpoints</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="section-note">These are Azure backbone medians from a nearby region. Measure speech-to-text latency from the actual Sri Lanka network or telephony gateway to see the effect on calls.</p>
+      <div class="table-scroll evidence-table" role="region" aria-label="Operational comparison" tabindex="0">
+        <table role="table">
+          <thead><tr><th scope="col">Decision</th><th scope="col">Compare on the same calls</th><th scope="col">Evidence</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Latency and turn taking</th><td>Track first visible text, speech-end to final text, and p50/p95. Keep audio, language and segmentation settings fixed for the Azure region comparison. Include the time Groq spends filling each chunk.</td><td><a href="#live">Live test</a></td></tr>
+            <tr><th scope="row">Accuracy and cleanup</th><td>Use exact human transcripts to score raw, deterministic, and LLM outputs. Check Sinhala–English switching, names and numbers separately.</td><td><a href="#live">Live accuracy reference</a></td></tr>
+            <tr><th scope="row">Call-center load</th><td>Repeat at expected peak concurrency and record dropouts, incomplete transcripts, and quota errors.</td><td><a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits">Azure quotas</a></td></tr>
+            <tr><th scope="row">Hetzner self-hosting</th><td>Hetzner quotes server rental and setup fees. Use a current server quote and benchmark the model’s latency and concurrent calls per server before costing self-hosted speech recognition.</td><td><a href="https://www.hetzner.com/dedicated-rootserver/gex45/">Hetzner GPU configurator</a></td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
 </body>

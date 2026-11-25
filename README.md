@@ -5,10 +5,10 @@ A benchmark demo for Sinhala call-center speech recognition. Live test compares 
 ## Present the demo
 
 1. Choose **Pauses and restarts** or **Sinhala–English code-switching**, then switch between clean audio, G.711 A-law, and 10 dB telephone noise.
-2. Use **Streams** to watch both providers side by side. Play the 1× replay or scrub the waveform. **Show results** jumps to the full outputs.
-3. Open **Cleanup** to compare **Raw**, **Deterministic**, and **LLM cleanup** for either provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
-4. Paste a human-verified reference for the selected scenario to reveal CER and WER once the transcripts finish. Optionally enter approved terms as `heard term => approved term`, one per line. The reference and glossary stay in the browser tab.
-5. Open **Benchmarks** for the three-call pilot, rollout checks, and a price-sourced USD calculator. Accuracy scores need verified references.
+2. Open **Cleanup** to play the 1× replay, scrub the waveform, or expand **Captured streams**. **Show results** jumps to the full outputs.
+3. Compare **Raw**, **Deterministic**, and **LLM cleanup** for either captured provider. Rules run locally. Flash-Lite output and the added request time come from the capture. The noisy pause sample includes the successful retry capture.
+4. Paste a human-verified reference for the selected scenario to reveal CER and WER once the transcripts finish. **Live test → Accuracy reference** scores each completed provider for the selected transcript stage. Paste a microphone reference after its run. For captured cleanup, optionally enter approved terms as `heard term => approved term`, one per line. The references and glossary stay in the browser tab.
+5. Open **Benchmarks** for the three-call pilot, **Costs** for the source-linked calculator, and **Deployment** for the Azure region comparison and call-center rollout checks.
 6. Choose **Load real calls** and select the separate private replay file from your computer. The tab loads the recording and captured transcripts locally. Keep the file outside the repository and deployment.
 
 ## Deploy to Vercel
@@ -64,4 +64,4 @@ Open [localhost:8080](http://localhost:8080). Run the dependency-free checks wit
 node --test
 ```
 
-The Streams replay contains simulated audio and captured outputs. Benchmarks includes anonymized numerical measurements for three real calls from the pilot. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.
+Captured streams under **Cleanup** contains simulated audio and captured outputs. **Benchmarks** includes anonymized numerical measurements for three real calls from the pilot. In the measured runs, both providers received the same 16 kHz mono stream in 20 ms packets with Sinhala selected or hinted. Speech boundaries are estimated by Silero VAD.

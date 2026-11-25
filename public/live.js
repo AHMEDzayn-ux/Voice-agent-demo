@@ -18,6 +18,7 @@
   const groqChunkBytes = 4 * sampleRate * 2;
   const cleanupContextLimit = 480;
   const recordingSelect = get("live-recording");
+  const referenceInput = get("live-reference");
   const localFileId = "local-file";
   const recordings = (window.DEMO_DATA?.clips || []).flatMap(({ id, condition, scenarioLabel, label, audio }) => {
     const conditionLabel = condition === "g711_alaw" ? "Telephone (G.711 A-law)" : label;
@@ -33,6 +34,8 @@
   let lastRun = null;
   let configuredFeeds;
   let discovering = false;
+  const references = new Map();
+  let selectedReference;
 
   const make = (tag, value, classes) => {
     const element = document.createElement(tag);
@@ -60,6 +63,15 @@
     }
     recordingSelect.value = selected || recordings[0]?.id || "";
     get("live-stream").disabled = !recordingSelect.value;
+  }
+
+  function recordingReferenceKey() {
+    return recordingSelect.value === localFileId ? localFileId : recordingSelect.value.split("/")[0];
+  }
+
+  function selectReference(key) {
+    selectedReference = key;
+    referenceInput.value = references.get(key) || "";
   }
 
   const states = {};
@@ -115,7 +127,9 @@
     pipeline.append(pipelineHead, pipelineBody);
     const cleanupNote = make("p", null, "transcript-foot");
     cleanupNote.hidden = true;
-    output.append(transcript, timing, cleanupNote);
+    const accuracy = make("p", null, "transcript-foot live-accuracy");
+    accuracy.hidden = true;
+    output.append(transcript, timing, cleanupNote, accuracy);
     const pipelineDetails = make("details", null, "live-pipeline-details");
     const summary = make("summary");
     const pipelineTotal = make("span", null, "pipeline-summary-total");
@@ -127,7 +141,7 @@
     output.hidden = measurements.hidden = provider === "openai";
     panel.append(header, output, measurements);
     get("live-feeds").append(panel);
-    states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal };
+    states[provider] = { panel, status, fields, output, measurements, transcript, timing, stages, cleanupNote, pipelineTotal, accuracy };
   }
 
   function formatDuration(ms) {
@@ -188,6 +202,7 @@
     const parts = finalizedParts(run, provider);
     ui.transcript.replaceChildren();
     let fallbackVisible = false;
+    let scoredText = "";
     if (stage === "llm" && run.llmEnabled && (parts.length || interim)) {
       let hasText = false;
       for (const part of parts) {
@@ -197,6 +212,7 @@
         if (!text) continue;
         fallbackVisible ||= !corrected;
         ui.transcript.append(make("span", `${hasText ? " " : ""}${text}`, corrected ? null : "waiting"));
+        scoredText += `${hasText ? " " : ""}${text}`;
         hasText = true;
       }
       if (interim) ui.transcript.append(make("span", `${hasText ? " " : ""}${core.clean(interim)}`, "interim"));
@@ -204,6 +220,7 @@
       ui.transcript.append(make("span", run.llmEnabled ? "Waiting for finalized text." : "Enable LLM cleanup before starting a test.", "waiting"));
     } else {
       const text = stage === "rules" ? parts.map((part) => part.rules).join(" ") : raw;
+      scoredText = text;
       const pending = stage === "rules" ? core.clean(interim) : interim;
       if (text) ui.transcript.append(make("span", text));
       if (pending) ui.transcript.append(make("span", `${text ? " " : ""}${pending}`, "interim"));
@@ -218,6 +235,14 @@
         ? `${kind} received at ${elapsed(latest.arrival)}${latest.afterPlayback ? " · after playback" : ""}`
         : `${kind} received at recording ${elapsed(latest.position)}`;
     }
+    const reference = references.get(run.referenceKey);
+    const cleanupPending = stage === "llm" && parts.some((part) => part.batch?.llm.requestMs === undefined);
+    const score = reference && scoredText && ui.status.textContent === "Complete" && !cleanupPending
+      ? core.score(reference, scoredText) : null;
+    ui.accuracy.hidden = !score;
+    ui.accuracy.textContent = score
+      ? `WER ${(score.wer * 100).toFixed(1)}% · CER ${(score.cer * 100).toFixed(1)}%${fallbackVisible ? " · Includes deterministic fallback" : ""}`
+      : "";
     renderPipeline(run, provider, ui, pipeline.latest, fallbackVisible);
   }
 
@@ -384,6 +409,9 @@
     }
     for (const { status } of Object.values(states)) {
       if (status.textContent === "Connecting") status.textContent = "Unavailable";
+    }
+    for (const provider of Object.keys(states)) {
+      if (states[provider].status.textContent === "Complete") render(run, provider);
     }
     get("live-status").textContent = text;
     setBusy(false);
@@ -690,6 +718,7 @@
       return get("live-status").textContent = "Microphone access requires HTTPS or localhost.";
     }
     cancelCleanup(lastRun);
+    if (mode === "mic") references.delete("microphone");
     const run = {
       started: null, stopping: false, sockets: {}, ready: new Set(), failed: new Set(),
       events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
@@ -697,8 +726,10 @@
       llmEnabled: get("live-llm").checked, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
       pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [] }])),
       cleanupRequests: new Map(),
+      referenceKey: mode === "mic" ? "microphone" : recordingReferenceKey(),
     };
     current = lastRun = run;
+    selectReference(run.referenceKey);
     get("live-clock").textContent = "0:00.0";
     get("live-progress").hidden = true;
     showProviderRows(configuredFeeds ?? defaultFeeds);
@@ -810,10 +841,19 @@
       return;
     }
     localFile = file;
+    references.delete(localFileId);
     refreshRecordings(localFileId);
+    selectReference(recordingReferenceKey());
     get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
+  recordingSelect.addEventListener("change", () => selectReference(recordingReferenceKey()));
+  referenceInput.addEventListener("input", () => {
+    references.set(selectedReference, referenceInput.value.trim());
+    if (lastRun?.referenceKey === selectedReference) {
+      for (const provider of Object.keys(states)) render(lastRun, provider);
+    }
+  });
   get("live-stage").addEventListener("change", () => {
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
@@ -828,5 +868,6 @@
   });
   window.LiveBench = { discover, stop };
   refreshRecordings();
+  selectReference(recordingReferenceKey());
   if (!get("live").hidden) void discover();
 })();

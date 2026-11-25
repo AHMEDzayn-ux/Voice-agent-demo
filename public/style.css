@@ -139,7 +139,7 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
   background-position: right 15px center, right 10px center; background-repeat: no-repeat; background-size: 5px 5px;
 }
 .options { background: #ecf1e6; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; flex: 1; margin-top: 23px; }
-.options summary, .cost-panel summary { font-weight: 730; padding-block: 2px; }
+.options summary { font-weight: 730; padding-block: 2px; }
 .options-grid, .cost-inputs { display: grid; gap: 12px; margin-top: 13px; }
 .options-grid { grid-template-columns: 1fr 1fr; }
 .options textarea { display: block; width: 100%; margin-top: 4px; resize: vertical; line-height: 1.5; }
@@ -160,10 +160,19 @@ h1 { margin: 0; font-size: clamp(1.13rem, 2.25vw, 1.45rem); line-height: 1.14; l
 .cost-inputs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .cost-inputs label { display: grid; gap: 5px; color: var(--muted); font-size: .875rem; font-weight: 640; }
 .cost-inputs input { width: 100%; }
-.cost-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 7px 0 0; padding: 0; }
-.cost-results li { display: grid; gap: 4px; background: #eaf0e4; border-radius: 8px; padding: 8px; font-size: .875rem; }
-.cost-results strong { font-variant-numeric: tabular-nums; font-size: 1rem; }
-.cost-panel a { color: var(--green); }
+.evidence-table { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcf5; }
+.evidence-table table { margin: 0; text-align: left; }
+.evidence-table :is(th, td) { padding: 8px 11px; vertical-align: top; line-height: 1.4; }
+.evidence-table thead { background: #eaf0e4; }
+.evidence-table thead th { border-top: 0; }
+.evidence-table output { font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.evidence-table small { display: block; color: var(--muted); }
+.evidence-table a { color: var(--green); }
+.evidence-heading { margin: 14px 0 0; font-size: 1rem; }
+.live-reference { margin-top: 8px; }
+.live-reference label { display: block; margin-bottom: 5px; font-size: .875rem; }
+.live-reference textarea { width: min(100%, 680px); min-height: 72px; resize: vertical; }
+.live-accuracy { font-variant-numeric: tabular-nums; font-weight: 700; }
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); border: 1px solid var(--line); border-radius: 14px; background: #fbfcf5; }
 .metric { padding: 12px 14px; }
 .metric + .metric { border-left: 1px solid var(--line); }
@@ -219,7 +228,7 @@ tr :first-child { text-align: left; }
   .cleanup-toolbar { flex-direction: column; align-items: stretch; gap: 5px; }
   .options { margin-top: 0; }
   .options-grid, .decision-grid, .method dl { grid-template-columns: 1fr; }
-  .cost-inputs, .cost-results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cost-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .swipe-note { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 6px; }
   .cleanup-grid { grid-template-columns: none; grid-auto-columns: min(79%, 290px); grid-auto-flow: column; overflow-x: auto; scroll-snap-type: x proximity; padding: 2px 2px 4px; }
   .stage { scroll-snap-align: start; }
@@ -227,6 +236,17 @@ tr :first-child { text-align: left; }
 @media (max-width: 560px) {
   .masthead-inner { align-items: stretch; flex-direction: column; gap: 5px; padding-block: 6px; }
   .view-tabs button { flex: 1 1 auto; padding-inline: 5px; }
+  .view-tabs { flex-wrap: wrap; }
+  .evidence-table table, .evidence-table tbody { display: block; min-width: 0; }
+  .evidence-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .evidence-table tbody tr { display: grid; gap: 4px 10px; padding: 8px 10px; }
+  .evidence-table tbody tr + tr { border-top: 1px solid var(--line); }
+  .evidence-table tbody :is(th, td) { padding: 0; border: 0; }
+  .value-table tbody tr { grid-template-columns: minmax(0, 1fr) minmax(0, .85fr); align-items: baseline; }
+  .value-table tbody td:nth-child(3) { grid-column: 2; grid-row: 1; text-align: right; }
+  .value-table tbody :is(td:nth-child(2), td:last-child) { grid-column: 1 / -1; }
+  .region-table tbody td:nth-child(2) { grid-column: 2; grid-row: 1; text-align: right; }
+  .region-table tbody td:nth-child(3) { grid-column: 1 / -1; grid-row: 2; text-align: left; }
 }
 @media (max-width: 410px) {
   .live-controls .clip-select label { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }

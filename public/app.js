@@ -271,16 +271,20 @@ function showResults() {
 }
 
 function setupViews() {
-  const views = ["replay", "live", "cleanup", "benchmark"];
+  const views = ["live", "cleanup", "benchmark", "costs", "deployment"];
   const fromHash = () => {
     const name = window.location.hash.slice(1);
     if (name === "method" || name === "decision") return "benchmark";
-    return views.includes(name) ? name : "replay";
+    if (name === "replay") {
+      el("replay").open = true;
+      return "cleanup";
+    }
+    return views.includes(name) ? name : "live";
   };
   function activate(name, updateHash = false) {
-    el("replay-console").hidden = name === "live";
+    el("replay-console").hidden = name !== "cleanup";
     if (name !== "live") window.LiveBench?.stop();
-    else if (isPlaying()) {
+    if (name !== "cleanup" && isPlaying()) {
       if (tail) tail = { seconds: position(), startedAt: null };
       else audio.pause();
       syncButton();
@@ -361,21 +365,49 @@ function renderMetrics(data) {
   }
 }
 
+const costFields = {
+  callerMinutes: "minutes", callSeconds: "call-seconds", replyMinutes: "reply-minutes",
+  liveTextIn: "live-text-in", liveTextOut: "live-text-out",
+  requests: "cleanup-requests", cleanupIn: "cleanup-in", cleanupOut: "cleanup-out",
+};
+
+function costInput(id) {
+  const field = el(id);
+  return field.value !== "" && field.checkValidity() ? Number(field.value) : NaN;
+}
+
+const usd = new Intl.NumberFormat("en", { style: "currency", currency: "USD" });
+
 function updateCost() {
-  const value = (id) => {
-    const field = el(id);
-    return field.value !== "" && field.checkValidity() ? Number(field.value) : NaN;
-  };
-  const estimates = core.estimateCosts(value("minutes"), value("reply-minutes"), value("cleanup-requests"));
-  const usd = new Intl.NumberFormat("en", { style: "currency", currency: "USD" });
-  const format = (value) => estimates ? `${usd.format(value)}/mo` : "—";
+  const usage = Object.fromEntries(Object.entries(costFields).map(([key, id]) => [key, costInput(id)]));
+  const estimates = core.estimateCosts(usage);
+  const format = (amount) => Number.isFinite(amount) ? usd.format(amount) : "—";
+  const count = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
   el("cost-nova").textContent = format(estimates?.nova);
-  el("cost-gemini").textContent = format(estimates && estimates.geminiInput + estimates.geminiOutput);
+  el("cost-nova-previous").textContent = estimates ? `${format(estimates.novaPrevious)} at previous rate` : "";
+  el("cost-gemini").textContent = format(estimates ? estimates.geminiInput + estimates.geminiOutput + estimates.geminiText : undefined);
+  el("cost-gemini-details").textContent = estimates
+    ? `${format(estimates.geminiInput)} input + ${format(estimates.geminiOutput)} reply + ${format(estimates.geminiText)} text`
+    : "";
+  el("cost-azure").textContent = format(estimates?.azure);
+  el("cost-azure-free").textContent = estimates?.azureFree === false ? "Over F0 limit" : format(estimates ? 0 : undefined);
   el("cost-openai").textContent = format(estimates?.openai);
-  el("cost-cleanup").textContent = format(estimates?.cleanup);
-  el("cost-breakdown").textContent = estimates
-    ? `Gemini audio subtotal: ${usd.format(estimates.geminiInput)} caller input + ${usd.format(estimates.geminiOutput)} spoken output. Cleanup is an optional add-on to either path.`
-    : "Enter valid, non-negative monthly usage in all three fields.";
+  el("cost-groq").textContent = format(estimates?.groq);
+  el("cost-groq-details").textContent = estimates
+    ? `About ${count.format(estimates.groqChunks)} chunks · ${count.format(estimates.groqBilledMinutes)} billed min`
+    : "";
+  el("cost-cleanup").textContent = format(estimates?.flashLite);
+  el("cost-qwen").textContent = format(estimates?.qwen);
+  el("cost-error").hidden = Boolean(estimates);
+}
+
+function updateHostingCost() {
+  const servers = costInput("hosting-count");
+  const monthly = costInput("hosting-monthly") * servers;
+  const setup = costInput("hosting-setup") * servers;
+  el("hosting-result").textContent = Number.isFinite(monthly + setup)
+    ? `${usd.format(monthly)}/month · ${usd.format(monthly + setup)} for the first month with setup`
+    : "Enter the quoted monthly rental, setup fee, and server count.";
 }
 
 function validatePrivatePack(pack) {
@@ -490,9 +522,6 @@ if (window.DEMO_DATA && core) {
     }
     updateLab(position(), true);
   });
-  for (const id of ["minutes", "reply-minutes", "cleanup-requests"]) {
-    el(id).addEventListener("input", updateCost);
-  }
   el("play").addEventListener("click", togglePlayback);
   el("restart").addEventListener("click", () => seek(0));
   el("results").addEventListener("click", showResults);
@@ -511,8 +540,10 @@ if (window.DEMO_DATA && core) {
   window.addEventListener("resize", () => drawWave(position()));
   changeScenario();
   renderMetrics(metrics);
-  updateCost();
 } else {
   el("player-status").textContent = "The demo data could not be loaded.";
   for (const id of ["play", "restart", "results", "position", "clip", "scenario"]) el(id).disabled = true;
 }
+for (const id of Object.values(costFields)) el(id).addEventListener("input", updateCost);
+for (const id of ["hosting-count", "hosting-monthly", "hosting-setup"]) el(id).addEventListener("input", updateHostingCost);
+updateCost();
