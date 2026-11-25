@@ -83,7 +83,9 @@
           <option value="llm">LLM cleanup</option>
         </select></label>
         <label><input id="live-llm" type="checkbox"> LLM cleanup</label>
+        <label><input id="live-digits" type="checkbox" aria-describedby="live-digits-help"> Digit dictation</label>
       </div>
+      <p id="live-digits-help" class="live-provider-notices" hidden>Speak only the identifier, in digits or groups. LLM cleanup joins the groups as they arrive.</p>
       <p id="live-provider-notices" role="status" class="live-provider-notices" hidden></p>
       <div id="live-feeds" class="live-feeds"></div>
       <details id="live-review" class="per-call live-reference">

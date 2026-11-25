@@ -9,6 +9,7 @@ const core = require("../public/demo-core.js");
 const wire = require("../public/live-wire.js");
 const liveSession = require("../api/live-session.js");
 const liveCleanup = require("../api/live-cleanup.js");
+const { readDictatedDigits } = require("../lib/dictated-digits.js");
 const groqTranscribe = require("../api/groq-transcribe.js");
 
 const site = path.join(__dirname, "..", "public");
@@ -103,6 +104,15 @@ test("spoken account groups preserve leading zeros when the matching words are a
   assert.deepEqual(core.repeatedZeroRevisions(label + "02-25-53", [label + words]), []);
   assert.deepEqual(core.repeatedZeroRevisions("price " + digits, [words]), []);
   assert.deepEqual(core.repeatedZeroRevisions(label + "002552", [words]), []);
+});
+
+test("digit dictation groups Sinhala cardinals and repetitions across finalized text", () => {
+  const spoken = "බින්දුවයි එකසිය. තිස් පහයි. 321 යි. 554 යි. ආ බින්දු දෙකයි. දෙකේම තුනයි. පහේ හතරයි. අ.";
+  assert.equal(readDictatedDigits(spoken), "0135321554002225555");
+  assert.equal(readDictatedDigits("022551 බිංදු දෙකක්."), "02255100");
+  assert.equal(readDictatedDigits("බින්දුවයි එකසිය"), null);
+  assert.equal(readDictatedDigits("02 ඉතිරිය පැහැදිලි නෑ"), null);
+  assert.equal(readDictatedDigits("මුදල 02%"), null);
 });
 
 test("comparison tabs are exclusive, keyboard-accessible, and preserve playback", async () => {
@@ -764,15 +774,16 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
   let context = "\u0db8\u0dda fiber package 2048";
   let input = text;
   let output = `${text}.`;
+  let digitDictation = false;
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url.startsWith("https://api.groq.com/")) {
       assert.equal(options.headers.Authorization, "Bearer example-groq-key");
       const { model, reasoning_effort, messages } = JSON.parse(options.body);
       assert.equal(model, "qwen/qwen3.8-27b");
       assert.equal(reasoning_effort, "none");
-      assert.match(messages[0].content, /Return only the corrected current chunk/);
+      assert.match(messages[0].content, digitDictation ? /Return only ASCII digits/ : /Return only the corrected current chunk/);
       assert.match(messages[0].content, /බිංදු දෙකයි.*00/);
-      assert.deepEqual(JSON.parse(messages[1].content), { text: input, context });
+      assert.deepEqual(JSON.parse(messages[1].content), digitDictation ? { text: input } : { text: input, context });
       return { ok: true, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: output } }] }) };
     }
     assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
@@ -860,6 +871,25 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
     assert.equal(result.code, code, `${spoken} → ${candidate}`);
     assert.equal(result.body.text, code === 200 ? candidate : undefined);
   }
+
+  digitDictation = true;
+  input = "බින්දුවයි එකසිය. තිස් පහයි. 321 යි. 554 යි. ආ බින්දු දෙකයි. දෙකේම තුනයි. පහේ හතරයි. අ.";
+  output = "0135321554002225555";
+  const dictation = response();
+  await liveCleanup({ method: "POST", body: { text: input, digitDictation } }, dictation);
+  assert.equal(dictation.code, 200);
+  assert.equal(dictation.body.text, output);
+  output = output.slice(1);
+  const lostLeadingZero = response();
+  await liveCleanup({ method: "POST", body: { text: input, digitDictation } }, lostLeadingZero);
+  assert.equal(lostLeadingZero.code, 422);
+  assert.match(lostLeadingZero.body.error, /verify every digit/);
+  const previousCalls = fetch.mock.callCount();
+  const unclear = response();
+  await liveCleanup({ method: "POST", body: { text: "ආ ඉතිරිය 02", digitDictation } }, unclear);
+  assert.equal(unclear.code, 422);
+  assert.match(unclear.body.error, /Some groups were unclear/);
+  assert.equal(fetch.mock.callCount(), previousCalls);
 });
 
 test("Groq STT validates the chunk and wraps its PCM without changing samples", async (t) => {

@@ -1,6 +1,7 @@
 "use strict";
 
 const { score, normalizeSpokenZeroPairs } = require("../public/demo-core.js");
+const { readDictatedDigits } = require("../lib/dictated-digits.js");
 
 const groqModel = "qwen/qwen3.8-27b";
 const geminiModel = "gemini-3.5-flash-lite";
@@ -27,6 +28,12 @@ const instruction = [
   "Use thousands separators only for quantities, and keep account, phone, and NIC identifiers as identifiers.",
   `Use standard English spelling for these clearly spoken loanwords when context supports it: ${Object.values(loanwords).join(", ")}.`,
   "Fix clear recognition, spacing and punctuation errors. Keep uncertain words as written.",
+].join(" ");
+const digitInstruction = [
+  'The "text" field is one Sinhala identifier dictated in groups. Convert every group to digits in order and concatenate them.',
+  'Return only ASCII digits, with no other text. Retain existing digit groups exactly, including leading zeros. Ignore punctuation and hesitation sounds.',
+  'Examples: "බින්දුවයි" = 0. "එකසිය තිස් පහයි" = 135. "322 යි" = 322. "බිංදු දෙකයි" = 00. "දෙකේම තුනයි" = 222. "පහේ හතරයි" = 5555.',
+  'Example: "බින්දුවයි විසි පහයි. ආ බිංදු දෙකයි." = 02500. Return UNCLEAR if any group is unsupported by the text.',
 ].join(" ");
 
 function normalizeFormatting(text) {
@@ -81,6 +88,12 @@ module.exports = async function liveCleanup(request, response) {
   if (typeof context !== "string" || context.length > 480) {
     return response.status(400).json({ error: "Cleanup context must be text with at most 480 characters." });
   }
+  const { digitDictation = false } = request.body;
+  if (typeof digitDictation !== "boolean") return response.status(400).json({ error: "Digit dictation must be enabled or disabled." });
+  const expectedDigits = digitDictation ? readDictatedDigits(text) : null;
+  if (digitDictation && !expectedDigits) {
+    return response.status(422).json({ error: "Some groups were unclear. Repeat the identifier one digit at a time." });
+  }
   const groqKey = process.env.GROQ_API_KEY;
   const googleKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
   if (!groqKey && !googleKey) return response.status(503).json({ error: "Add a Groq or Google API key in Vercel for cleanup." });
@@ -88,14 +101,16 @@ module.exports = async function liveCleanup(request, response) {
   const url = groqKey ? "https://api.groq.com/openai/v1/chat/completions"
     : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const headers = groqKey ? { Authorization: `Bearer ${groqKey}` } : { "x-goog-api-key": googleKey };
-  const chunk = JSON.stringify({ context, text });
+  const prompt = digitDictation ? digitInstruction : instruction;
+  const chunk = JSON.stringify(digitDictation ? { text } : { context, text });
+  const maxTokens = digitDictation ? 128 : 768;
   const body = groqKey ? {
-    model, temperature: 0, reasoning_effort: "none", max_completion_tokens: 768,
-    messages: [{ role: "system", content: instruction }, { role: "user", content: chunk }],
+    model, temperature: 0, reasoning_effort: "none", max_completion_tokens: maxTokens,
+    messages: [{ role: "system", content: prompt }, { role: "user", content: chunk }],
   } : {
-    systemInstruction: { parts: [{ text: instruction }] },
+    systemInstruction: { parts: [{ text: prompt }] },
     contents: [{ parts: [{ text: chunk }] }],
-    generationConfig: { temperature: 0, thinkingConfig: { thinkingLevel: "MINIMAL" }, maxOutputTokens: 768 },
+    generationConfig: { temperature: 0, thinkingConfig: { thinkingLevel: "MINIMAL" }, maxOutputTokens: maxTokens },
   };
 
   const start = performance.now();
@@ -116,6 +131,12 @@ module.exports = async function liveCleanup(request, response) {
       ?.filter((part) => !part.thought).map((part) => part.text || "").join(""))?.trim();
     if (!finished || !cleaned) {
       return response.status(502).json({ error: "The cleanup model returned incomplete text.", apiMs, model });
+    }
+    if (digitDictation) {
+      if (cleaned !== expectedDigits) {
+        return response.status(422).json({ error: "Could not verify every digit. Repeat the identifier one digit at a time.", apiMs, model });
+      }
+      return response.status(200).json({ text: cleaned, apiMs, model });
     }
     const normalizedText = normalizeFormatting(text);
     const normalizedCleanup = normalizeFormatting(cleaned);

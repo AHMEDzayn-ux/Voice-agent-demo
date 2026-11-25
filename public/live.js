@@ -219,7 +219,12 @@
       : [...parts.values()];
   }
 
-  function llmFragments(parts) {
+  function llmFragments(parts, digitDictation) {
+    if (digitDictation) {
+      const batch = parts.at(-1)?.batch;
+      const text = batch?.parts.length === parts.length ? batch.llm.text : null;
+      return text ? [{ text, corrected: true }] : [];
+    }
     return parts.flatMap((part) => {
       const corrected = part.batch?.llm.text;
       if (corrected && part.batch.parts[0] !== part) return [];
@@ -282,7 +287,7 @@
     const finished = run && run !== current;
     const complete = finished && states[provider].status.textContent === "Complete" && (!run.playback || run.playback.ended);
     const parts = run ? finalizedParts(run, provider) : [];
-    const fragments = run?.llmEnabled ? llmFragments(parts) : [];
+    const fragments = run?.llmEnabled ? llmFragments(parts, run.digitDictation) : [];
     const pending = run?.llmEnabled && parts.some((part) => part.batch?.llm.requestMs === undefined);
     const hasCleanup = fragments.some((part) => part.corrected);
     const raw = !run ? "" : provider === "openai" ? run.openaiTranscript.text().raw
@@ -295,6 +300,7 @@
     let missingCleanup = finished ? "No LLM-cleaned text was returned." : waiting;
     if (run && !run.llmEnabled) missingCleanup = "Enable LLM cleanup before starting a test.";
     else if (pending) missingCleanup = "Cleaning finalized chunks…";
+    else if (run?.digitDictation) missingCleanup = parts.at(-1)?.batch?.llm.error || "Waiting for dictated digits.";
     const results = {
       raw,
       llm: hasCleanup ? fragments.map((part) => part.text).join(" ") : "",
@@ -328,14 +334,15 @@
     let scoredText = "";
     if (stage === "llm" && run.llmEnabled && (parts.length || interim)) {
       let hasText = false;
-      for (const { text, corrected } of llmFragments(parts)) {
+      for (const { text, corrected } of llmFragments(parts, run.digitDictation)) {
         if (!text) continue;
         fallbackVisible ||= !corrected;
         ui.transcript.append(make("span", `${hasText ? " " : ""}${text}`, corrected ? null : "waiting"));
         scoredText += `${hasText ? " " : ""}${text}`;
         hasText = true;
       }
-      if (interim) ui.transcript.append(make("span", `${hasText ? " " : ""}${interim}`, "interim"));
+      if (run.digitDictation && !hasText) ui.transcript.append(make("span", "Waiting for verified digits.", "waiting"));
+      else if (interim && !run.digitDictation) ui.transcript.append(make("span", `${hasText ? " " : ""}${interim}`, "interim"));
     } else if (stage === "llm") {
       ui.transcript.append(make("span", run.llmEnabled ? "Waiting for finalized text." : "Enable LLM cleanup before starting a test.", "waiting"));
     } else {
@@ -395,7 +402,7 @@
       if (run.llmEnabled) pipeline.pending.push(part);
     }
     if (!pipeline.pending.length || pipeline.active) return;
-    if (run.stopping || message.speech_final || provider === "openai" || provider === "groq" || provider === "azure") {
+    if (run.stopping || (!run.digitDictation && (message.speech_final || provider === "openai" || provider === "groq" || provider === "azure"))) {
       void requestCleanup(run, provider);
     } else if (pipeline.timer === undefined) {
       pipeline.timer = setTimeout(() => void requestCleanup(run, provider), 180);
@@ -403,8 +410,9 @@
   }
 
   async function fetchCleanup(run, text, context) {
+    const body = run.digitDictation ? { text, digitDictation: true } : { text, context };
     const response = await fetch("/api/live-cleanup", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, context }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       signal: AbortSignal.any([run.cleanupController.signal, AbortSignal.timeout(3000)]),
     });
     const result = await response.json().catch(() => ({}));
@@ -419,11 +427,13 @@
     clearTimeout(pipeline.timer);
     pipeline.timer = undefined;
     if (!pipeline.pending.length || pipeline.active || lastRun !== run || run.cleanupController.signal.aborted) return;
-    // OpenAI turns can complete out of order. Keep their corrections attached to individual turns.
-    const parts = pipeline.pending.splice(0, provider === "openai" ? 1 : pipeline.pending.length);
+    const history = finalizedParts(run, provider);
+    // Dictation can split a spoken number across boundaries. Re-evaluate the ordered prefix.
+    // Ordinary OpenAI turns can complete out of order. Keep those corrections attached to each turn.
+    const pending = pipeline.pending.splice(0, provider === "openai" && !run.digitDictation ? 1 : pipeline.pending.length);
+    const parts = run.digitDictation ? history : pending;
     const latest = parts.at(-1);
     const text = parts.map((part) => part.raw).join(" ");
-    const history = finalizedParts(run, provider);
     const first = history.indexOf(parts[0]);
     const context = history.slice(Math.max(0, first - 4), first).map((part) => part.raw)
       .join("\n").slice(-cleanupContextLimit).trimStart();
@@ -471,7 +481,7 @@
   }
 
   function setBusy(busy) {
-    for (const id of ["live-mic", "live-recording", "live-file", "live-llm"]) get(id).disabled = busy;
+    for (const id of ["live-mic", "live-recording", "live-file", "live-llm", "live-digits"]) get(id).disabled = busy;
     get("live-stream").disabled = busy || !recordingSelect.value;
     get("live-stop").disabled = !busy;
   }
@@ -886,6 +896,7 @@
       events: Object.fromEntries(Object.keys(providers).map((provider) => [provider, []])),
       openaiInput: wire.openaiInput(), openaiTranscript: wire.openaiTranscript(), latest: {}, controller: new AbortController(),
       llmEnabled: get("live-llm").checked, drains: {}, sealed: new Set(), cleanupController: new AbortController(),
+      digitDictation: get("live-digits").checked,
       pipeline: Object.fromEntries(Object.keys(providers).map((provider) => [provider, { parts: new Map(), pending: [], interims: new Map() }])),
       cleanupRequests: new Map(),
       referenceKey: mode === "mic" ? "microphone" : recordingReferenceKey(),
@@ -1010,10 +1021,21 @@
     get("live-status").textContent = "Audio file ready. Select Play & stream to run the live test.";
   });
   get("live-stop").addEventListener("click", () => stop());
+  get("live-digits").addEventListener("change", ({ target }) => {
+    get("live-digits-help").hidden = !target.checked;
+    if (!target.checked) return;
+    get("live-llm").checked = true;
+    get("live-stage").value = "llm";
+    if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
+  });
   get("live-llm").addEventListener("change", ({ target }) => {
     const stage = get("live-stage");
     if (target.checked) stage.value = "llm";
-    else if (stage.value === "llm") stage.value = "raw";
+    else {
+      get("live-digits").checked = false;
+      get("live-digits-help").hidden = true;
+      if (stage.value === "llm") stage.value = "raw";
+    }
     if (lastRun) for (const provider of Object.keys(states)) render(lastRun, provider);
   });
   reviewPanel.addEventListener("toggle", renderReview);
