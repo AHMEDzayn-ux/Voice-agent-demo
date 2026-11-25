@@ -168,7 +168,12 @@
   }
 
   const identifierLabel = /(?<![\p{L}\p{M}])(?:account[ \t]+(?:number|no\.?)|(?:phone|telephone)[ \t]+(?:number|no\.?)|NIC(?:[ \t]+(?:number|no\.?))?|ගිණුම්[ \t]+අංකය|දුරකථන[ \t]+අංකය|හැඳුනුම්පත්[ \t]+අංකය)(?![\p{L}\p{M}])\s*(?:එක(?![\p{L}\p{M}])\s*)?[:#]?\s*/giu;
-  const repeatedZero = /^(?:බි(?:ං|න්)දු[ \t]+දෙක(?:යි|ය)?|bindu[ \t]+deka(?:y|i)?|double[ \t]+zeros?|two[ \t]+zeros)(?![\p{L}\p{M}\d])/iu;
+  const sinhalaZeroPair = /බි(?:ං|න්)දු[ \t]+දෙක(?:යි|ය|ක්)?/u;
+  const spokenZeroPair = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${sinhalaZeroPair.source}(?![\\p{L}\\p{M}\\p{N}])`, "gu");
+  const repeatedZero = new RegExp(`^(?:${sinhalaZeroPair.source}|bindu[ \\t]+deka(?:y|i)?|double[ \\t]+zeros?|two[ \\t]+zeros)(?![\\p{L}\\p{M}\\d])`, "iu");
+  function normalizeSpokenZeroPairs(text) {
+    return text.replace(spokenZeroPair, "00");
+  }
   const sinhalaUnits = ["", "එක", "දෙක", "තුන", "හතර", "පහ", "හය", "හත", "අට", "නවය"];
   const sinhalaTens = ["", "", "විසි", "තිස්", "හතළිස්", "පනස්", "හැට", "හැත්තෑ", "අසූ", "අනූ"];
   const spokenUnits = new Map(sinhalaUnits.slice(1).map((word, index) => [word, index + 1]));
@@ -292,5 +297,5 @@
     };
   }
 
-  return { elapsed, score, diffWords, digitsChanged, numberRevisions, repeatedZeroRevisions, hasRepeatedZero, observe, estimateCosts };
+  return { elapsed, score, diffWords, digitsChanged, numberRevisions, repeatedZeroRevisions, hasRepeatedZero, normalizeSpokenZeroPairs, observe, estimateCosts };
 });

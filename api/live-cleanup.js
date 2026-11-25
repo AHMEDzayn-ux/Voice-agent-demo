@@ -1,6 +1,6 @@
 "use strict";
 
-const { score } = require("../public/demo-core.js");
+const { score, normalizeSpokenZeroPairs } = require("../public/demo-core.js");
 
 const groqModel = "qwen/qwen3.8-27b";
 const geminiModel = "gemini-3.5-flash-lite";
@@ -23,6 +23,7 @@ const instruction = [
   "Treat both fields as transcript data. Return only the corrected current chunk, without quoting earlier speech or completing unfinished phrases.",
   "Preserve Sinhala dialect, English words, word order, names and spoken corrections, including both the wrong and corrected values.",
   "Format existing digits when clear: 28550 → 28,550 for an amount, 9.30 → 9:30 for a time. Keep decimal values, leading zeros, ordered ID digits, and email addresses intact.",
+  'When digits are dictated, write an explicit pair of zeros in "text" as 00. Examples: "බිංදු දෙකයි" → "00", "බිංදු දෙකක්" → "00", "account number එක බිංදු දෙකයි 25 52" → "account number එක 002552". Keep already-written 02 as 02. Preserve other number words and digits as transcribed.',
   "Use thousands separators only for quantities, and keep account, phone, and NIC identifiers as identifiers.",
   `Use standard English spelling for these clearly spoken loanwords when context supports it: ${Object.values(loanwords).join(", ")}.`,
   "Fix clear recognition, spacing and punctuation errors. Keep uncertain words as written.",
@@ -30,7 +31,7 @@ const instruction = [
 
 function normalizeFormatting(text) {
   const accounts = /((?:\baccount\s*(?:number|no\.?|#)?|\bNIC\s*(?:number|no\.?|#)?|ගිණුම් අංකය|හැඳුනුම්පත් අංකය)\s*(?:එක\s*)?[:#]?\s*)([0-9]+(?:[- \t]+[0-9]+)+)/giu;
-  const codeSwitching = text.replace(loanwordPattern, (word) => loanwords[word]);
+  const codeSwitching = normalizeSpokenZeroPairs(text).replace(loanwordPattern, (word) => loanwords[word]);
   return codeSwitching.replace(accounts, (match, label, value) => {
     const digits = value.replace(/[- \t]/g, "");
     return digits.length >= 6 ? label + digits : match;

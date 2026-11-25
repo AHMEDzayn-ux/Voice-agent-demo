@@ -761,7 +761,7 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
     else process.env.GROQ_API_KEY = groqKey;
   });
   const text = "\u0dc3\u0dd2 2048";
-  const context = "\u0db8\u0dda fiber package 2048";
+  let context = "\u0db8\u0dda fiber package 2048";
   let input = text;
   let output = `${text}.`;
   const fetch = t.mock.method(globalThis, "fetch", async (url, options) => {
@@ -771,6 +771,7 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
       assert.equal(model, "qwen/qwen3.8-27b");
       assert.equal(reasoning_effort, "none");
       assert.match(messages[0].content, /Return only the corrected current chunk/);
+      assert.match(messages[0].content, /බිංදු දෙකයි.*00/);
       assert.deepEqual(JSON.parse(messages[1].content), { text: input, context });
       return { ok: true, json: async () => ({ choices: [{ finish_reason: "stop", message: { content: output } }] }) };
     }
@@ -778,6 +779,7 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
     assert.equal(options.headers["x-goog-api-key"], "example-cleanup-key");
     const request = JSON.parse(options.body);
     assert.equal(request.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
+    assert.match(request.systemInstruction.parts[0].text, /බිංදු දෙකයි.*00/);
     assert.deepEqual(JSON.parse(request.contents[0].parts[0].text), { text: input, context });
     return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: output }] } }] }) };
   });
@@ -836,6 +838,27 @@ test("cleanup preserves numbers, dialect and email while allowing supported form
     const blocked = response();
     await liveCleanup({ method: "POST", body: { text: input, context } }, blocked);
     assert.equal(blocked.code, 422);
+  }
+
+  const zeroPairs = [
+    ["බිංදු දෙකයි", "00", 200],
+    ["බිංදු දෙකක්.", "00.", 200],
+    ["account number එක බින්දු දෙකයි 25 52", "Account number එක 002552", 200],
+    ["account number එක බිංදු දෙකයි, විසි පහයි, පනස් දෙකයි", "Account number එක 00, විසි පහයි, පනස් දෙකයි", 200],
+    ["බිංදු දෙකයි", "0", 422],
+    ["බිංදුව දෙක", "00", 422],
+    ["account number එක බිංදු දෙකයි 25 52", "Account number එක 002553", 422],
+    ["account number එක බිංදු දෙකයි 25 52", "Account number එක 022552", 422],
+    ["account number එක 022552", "Account number එක 002552", 422],
+  ];
+  context = "කලින් කිව්වේ බිංදු දෙකයි.";
+  for (const [spoken, candidate, code] of zeroPairs) {
+    input = spoken;
+    output = candidate;
+    const result = response();
+    await liveCleanup({ method: "POST", body: { text: input, context } }, result);
+    assert.equal(result.code, code, `${spoken} → ${candidate}`);
+    assert.equal(result.body.text, code === 200 ? candidate : undefined);
   }
 });
 
